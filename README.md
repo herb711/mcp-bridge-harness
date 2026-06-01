@@ -7,7 +7,7 @@ MCP Harness 是一个本地 MCP 管家桌面程序：它在本机提供可视化
 - 桌面 App 入口：`npm run app` / `npm run harness`
 - Electron IPC 调用本地 Harness 逻辑，不再把 localhost Web Dashboard 作为主架构
 - 安装时自动注册内置 `MiniMax Bridge MCP`
-- 可视化配置 MiniMax API Key、输出目录、Token Plan Proxy 等参数
+- 可视化配置 MiniMax API Key、输出目录、官方 MiniMax MCP Proxy、Token Plan Proxy 等参数
 - OpenCode 自动配置入口移动到：`Harness 目标 → OpenCode → 进入配置 OpenCode`
 - 一键写入 OpenCode 全局配置
 - OpenCode 重启后可直接使用 `minimax-bridge` MCP
@@ -43,7 +43,23 @@ npm run serve
 
 ## 快速开始
 
-### Windows
+### Windows（用户）
+
+直接下载 release 页面里的安装包：
+
+```text
+mcp-harness-0.2.0-x64-setup.exe   # NSIS 安装包（推荐，会创建桌面 + 开始菜单快捷方式）
+mcp-harness-0.2.0-x64-portable.exe  # 免安装绿色版，双击即可运行
+```
+
+下载后双击 `mcp-harness-0.2.0-x64-setup.exe`：
+
+1. 选择安装目录（默认 `C:\Program Files\MCP Harness`）。
+2. 勾选「创建桌面快捷方式」和「创建开始菜单快捷方式」。
+3. 安装完成，桌面会出现 **MCP Harness** 图标。
+4. 双击图标即可启动本地 MCP 管家桌面程序。
+
+### Windows（开发）
 
 双击：
 
@@ -59,7 +75,11 @@ npm run build
 npm run app
 ```
 
-### macOS / Linux
+### macOS / Linux（用户）
+
+下载 `mcp-harness-0.2.0-*.dmg` 或 `mcp-harness-0.2.0-*.AppImage`，分别拖入 `Applications` 或 `chmod +x` 后双击运行。
+
+### macOS / Linux（开发）
 
 ```bash
 chmod +x install.sh
@@ -74,7 +94,43 @@ npm run build
 npm run app
 ```
 
-安装脚本会：
+## 打包桌面安装包
+
+```bash
+# 仅 Windows（NSIS 安装包 + 绿色版）
+npm run dist:win
+
+# 跨平台
+npm run dist:mac
+npm run dist:linux
+npm run release:desktop   # 当前平台 + 重新生成 agent.manifest.json
+```
+
+构建产物统一输出到 `release/desktop/`：
+
+```text
+mcp-harness-0.2.0-x64-setup.exe      # NSIS 安装包
+mcp-harness-0.2.0-x64-portable.exe   # 免安装单文件
+mcp-harness-0.2.0-arm64-dmg.dmg      # macOS
+mcp-harness-0.2.0-x64-appimage.AppImage  # Linux
+win-unpacked/                        # 解包后的运行目录（用于调试）
+```
+
+构建基于 `electron-builder` + NSIS：
+
+- `appId`: `com.mcpharness.desktop`
+- 安装时自动创建桌面图标和「开始菜单 → MCP Harness」快捷方式
+- 默认 `oneClick=false`，允许选择安装目录
+- `perMachine=false`，装在当前用户下，不需要管理员
+- 卸载时保留 `appDataDir` 下的本地数据
+
+> 注意：当前主机如果在 Synology Drive / OneDrive 这类同步盘下构建，`rcedit` 写图标时会被驱动拦截（`Unable to commit changes`）。这是非致命错误，**安装包仍然能正常生成并运行**，只是不会嵌入自定义图标。解决办法是把源码 `Copy-Item` 到本地目录（如 `%TEMP%`）后在那里执行 `npm install && npm run dist:win`。
+
+## 安装脚本
+
+`install.bat` / `install.sh` 仅用于开发环境，从源码直接跑 Electron。普通用户请直接下载 release 里的安装包。
+
+它们会：
 
 1. 安装依赖，包括 Electron 桌面运行时。
 2. 构建 TypeScript 项目。
@@ -106,9 +162,10 @@ Harness 目标 → OpenCode → 进入配置 OpenCode
 
 1. 填入 MiniMax API Key。
 2. 确认 API Host、输出目录、TTS 模式。
-3. 按需启用 Token Plan MCP Proxy。
-4. 点击 **保存并配置到 OpenCode**。
-5. 重新打开 OpenCode，即可直接使用 `minimax-bridge` MCP。
+3. 默认启用官方 MiniMax MCP Proxy，官方 `minimax-mcp-js` 已支持的生成工具会优先转发到官方 MCP。
+4. 按需启用 Token Plan MCP Proxy。
+5. 点击 **保存并配置到 OpenCode**。
+6. 重新打开 OpenCode，即可直接使用 `minimax-bridge` MCP。
 
 MCP Harness 会写入：
 
@@ -147,7 +204,7 @@ MCP Harness 会把 OpenCode 配置合并成类似这样：
         "default"
       ],
       "enabled": true,
-      "timeout": 15000,
+      "timeout": 120000,
       "environment": {
         "MCP_HARNESS_HOME": "/absolute/path/to/local/harness/data"
       }

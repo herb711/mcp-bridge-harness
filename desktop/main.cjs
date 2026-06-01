@@ -6,13 +6,47 @@ const { pathToFileURL } = require('node:url');
 const appRoot = path.resolve(__dirname, '..');
 const webIndex = path.join(appRoot, 'web', 'index.html');
 const apiModulePath = path.join(appRoot, 'dist', 'harness', 'api.js');
+const shimModulePath = path.join(appRoot, 'dist', 'harness', 'shim.js');
 let apiModulePromise;
+let shimModulePromise;
 
 function importApiModule() {
   if (!apiModulePromise) {
     apiModulePromise = import(pathToFileURL(apiModulePath).href);
   }
   return apiModulePromise;
+}
+
+function importShimModule() {
+  if (!shimModulePromise) {
+    shimModulePromise = import(pathToFileURL(shimModulePath).href);
+  }
+  return shimModulePromise;
+}
+
+function applyPackagedEnv() {
+  if (!app.isPackaged) return;
+  const installDir = path.dirname(process.execPath);
+  const resourcesDir = process.resourcesPath || path.join(installDir, 'resources');
+  process.env.MCP_HARNESS_PACKAGED = '1';
+  process.env.MCP_HARNESS_INSTALL_DIR = installDir;
+  process.env.MCP_HARNESS_RESOURCES_DIR = resourcesDir;
+  process.env.MCP_HARNESS_EXECUTABLE = process.execPath;
+}
+
+async function ensureMcpShimFromMain() {
+  if (!app.isPackaged) return null;
+  try {
+    const shim = await importShimModule();
+    if (typeof shim.ensureMcpShim === 'function') {
+      const shimPath = await shim.ensureMcpShim();
+      if (shimPath) console.log(`MCP Harness shim installed at ${shimPath}`);
+      return shimPath;
+    }
+  } catch (error) {
+    console.warn('Failed to install MCP Harness shim:', error);
+  }
+  return null;
 }
 
 async function ensureBuilt() {
@@ -114,8 +148,15 @@ ipcMain.handle('harness:openPath', async (_event, filePath) => {
   return result ? { ok: false, error: result } : { ok: true };
 });
 
+ipcMain.handle('harness:reinstallShim', async () => {
+  const shimPath = await ensureMcpShimFromMain();
+  return { ok: Boolean(shimPath), shimPath: shimPath || null };
+});
+
 app.whenReady().then(async () => {
   process.env.MCP_HARNESS_DESKTOP = '1';
+  applyPackagedEnv();
+  await ensureMcpShimFromMain();
   if (!(await ensureBuilt())) return;
   createMenu();
   createWindow();

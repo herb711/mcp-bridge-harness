@@ -50,11 +50,53 @@ for (const line of sumsContent.split(/\r?\n/)) {
 const platformAliases = {
   'win-x64': 'windows-x64',
   'win-arm64': 'windows-arm64',
+  'windows-x64': 'windows-x64',
+  'windows-x64-setup': 'windows-x64',
+  'windows-x64-portable': 'windows-x64',
+  'windows-arm64': 'windows-arm64',
+  'windows-arm64-setup': 'windows-arm64',
+  'windows-arm64-portable': 'windows-arm64',
   'linux-x64': 'linux-x64',
   'linux-arm64': 'linux-arm64',
   'macos-x64': 'macos-x64',
   'macos-arm64': 'macos-arm64',
 };
+
+const archFromToken = {
+  x64: 'x64',
+  arm64: 'arm64',
+};
+
+const platformByOs = {
+  win: 'windows',
+  windows: 'windows',
+  linux: 'linux',
+  macos: 'macos',
+  mac: 'macos',
+  darwin: 'macos',
+};
+
+function platformKeyFor(file) {
+  const m = file.match(/^mcp-harness-\d+\.\d+\.\d+-(.+?)(\.[a-z0-9.]+)?$/i);
+  if (!m) return null;
+  const tokens = m[1].split('-');
+  let osName = null;
+  let arch = null;
+  for (const token of tokens) {
+    if (platformByOs[token.toLowerCase()]) osName = platformByOs[token.toLowerCase()];
+    else if (archFromToken[token.toLowerCase()]) arch = archFromToken[token.toLowerCase()];
+  }
+  if (!osName && tokens.length === 1 && archFromToken[tokens[0].toLowerCase()]) {
+    return null;
+  }
+  if (osName && arch) return `${osName}-${arch}`;
+  return tokens.join('-');
+}
+
+function aliasFor(platformKey) {
+  if (platformAliases[platformKey]) return platformAliases[platformKey];
+  return platformKey;
+}
 
 const platforms = {};
 const entries = fs.readdirSync(inputDir, { withFileTypes: true });
@@ -62,23 +104,27 @@ for (const entry of entries) {
   if (!entry.isFile()) continue;
   const file = entry.name;
   if (file === 'SHA256SUMS' || file === 'latest.json' || file.endsWith('.json')) continue;
-  const m = file.match(/^mcp-harness-\d+\.\d+\.\d+-(.+?)(\.exe)?$/);
-  if (!m) continue;
-  const platformKey = m[1];
-  const alias = platformAliases[platformKey] || platformKey;
+  const platformKey = platformKeyFor(file);
+  if (!platformKey) continue;
+  const alias = aliasFor(platformKey);
   const sha = checksums[file];
   if (!sha) {
     console.warn(`warning: no SHA256 recorded for ${file}, skipping`);
     continue;
   }
   const stats = fs.statSync(path.join(inputDir, file));
-  platforms[alias] = {
+  if (!platforms[alias]) platforms[alias] = [];
+  platforms[alias].push({
     upstreamPlatform: platformKey,
     asset: file,
     url: `https://github.com/${repo}/releases/download/${tag}/${file}`,
     sha256: sha,
     size: stats.size,
-  };
+  });
+}
+
+for (const [alias, list] of Object.entries(platforms)) {
+  list.sort((a, b) => a.asset.localeCompare(b.asset));
 }
 
 const manifest = {
@@ -94,4 +140,4 @@ const manifest = {
 fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 fs.writeFileSync(outputFile, JSON.stringify(manifest, null, 2) + '\n');
 console.log(`Wrote ${outputFile}`);
-console.log(`  platforms: ${Object.keys(platforms).join(', ') || '(none)'}`);
+console.log(`  platforms: ${Object.keys(platforms).map((alias) => `${alias}(${platforms[alias].length})`).join(', ') || '(none)'}`);

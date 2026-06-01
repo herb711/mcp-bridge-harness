@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('harnessApi', {
   invoke: (request) => ipcRenderer.invoke('harness:api', request),
   openPath: (filePath) => ipcRenderer.invoke('harness:openPath', filePath),
+  reinstallShim: () => ipcRenderer.invoke('harness:reinstallShim'),
   platform: process.platform,
   versions: {
     node: process.versions.node,

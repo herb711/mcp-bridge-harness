@@ -1,8 +1,11 @@
 {
   "name": "mcp-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local MCP manager and marketplace harness for OpenCode, Codex, Claude Code and bundled MiniMax MCP tools.",
   "type": "module",
+  "author": "MCP Harness",
+  "license": "MIT",
+  "homepage": "https://github.com/herb711/mcp-bridge-harness",
   "bin": {
     "mcp-harness": "./dist/index.js",
     "minimax-bridge-mcp": "./dist/index.js"
@@ -20,14 +23,20 @@
     "tools": "node dist/index.js --tools",
     "configure": "node scripts/configure.mjs --write-files --copy --print",
     "install:opencode": "node dist/index.js app",
-    "release:local": "node scripts/make-release.mjs",
-    "prepare:release": "npm run build && node scripts/generate-agent-manifest.mjs && npm run release:local",
     "app:dev": "npm run build && electron desktop/main.cjs",
     "app": "node dist/index.js app",
     "desktop": "node dist/index.js app",
     "serve": "node dist/index.js serve",
-    "web": "node dist/index.js serve"
+    "web": "node dist/index.js serve",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --x64 --publish never",
+    "dist:current": "npm run build && electron-builder --publish never",
+    "release:desktop": "npm run build && node scripts/generate-agent-manifest.mjs && electron-builder --publish never",
+    "release:win": "npm run build && node scripts/generate-agent-manifest.mjs && electron-builder --win --x64 --publish never",
+    "prepare:desktop": "npm run release:win"
   },
+  "main": "desktop/main.cjs",
   "engines": {
     "node": ">=20"
   },
@@ -39,11 +48,10 @@
   "devDependencies": {
     "@types/node": "^20.17.0",
     "@types/ws": "^8.5.12",
-    "esbuild": "^0.28.0",
-    "postject": "^1.0.0-alpha.6",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "tsx": "^4.19.0",
-    "typescript": "^5.8.0",
-    "electron": "^33.0.0"
+    "typescript": "^5.8.0"
   },
   "files": [
     "dist",
@@ -57,5 +65,66 @@
     "agent.manifest.json",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "build": {
+    "appId": "com.mcpharness.desktop",
+    "productName": "MCP Harness",
+    "copyright": "Copyright © 2026 MCP Harness",
+    "directories": {
+      "output": "release/desktop",
+      "buildResources": "."
+    },
+    "files": [
+      "dist/**",
+      "web/**",
+      "desktop/**",
+      "node_modules/**",
+      "package.json",
+      "agent.manifest.json"
+    ],
+    "asar": true,
+    "asarUnpack": [],
+    "icon": "logo.ico",
+    "extraMetadata": {
+      "main": "desktop/main.cjs"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "logo.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MCP Harness",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "mcp-harness-${version}-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "mcp-harness-${version}-${arch}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "artifactName": "mcp-harness-${version}-${arch}-dmg.${ext}"
+    },
+    "dmg": {
+      "title": "${productName} ${version}"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "category": "Development",
+      "artifactName": "mcp-harness-${version}-${arch}-appimage.${ext}"
+    }
+  }
 }

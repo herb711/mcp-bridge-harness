@@ -1,8 +1,9 @@
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { isSea } from "node:sea";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { packagedMcpCommand } from "./shim.js";
 
 export function appDataDir(): string {
   if (process.env.MCP_HARNESS_HOME?.trim()) return path.resolve(process.env.MCP_HARNESS_HOME.trim());
@@ -60,6 +61,9 @@ export function webRootPath(): string {
 }
 
 export function commandForBundledMcp(mcpId: string, profileId = "default"): string[] {
+  if (process.env.MCP_HARNESS_PACKAGED === "1") {
+    return packagedMcpCommand(mcpId, profileId);
+  }
   if (isSea()) return [process.execPath, "mcp", mcpId, "--profile", profileId];
   return ["node", harnessEntryPath(), "mcp", mcpId, "--profile", profileId];
 }

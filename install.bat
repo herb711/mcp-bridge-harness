@@ -22,6 +22,14 @@ if errorlevel 1 goto fail
 echo Initializing MCP Harness and opening the desktop app...
 call npm run harness:install:open
 if errorlevel 1 goto fail
+echo.
+echo ===========================================================
+echo MCP Harness dev install complete.
+echo.
+echo To produce a real Windows installer, run:
+echo     npm run dist:win
+echo The NSIS setup will be at release\desktop\mcp-harness-x.y.z-x64-setup.exe
+echo ===========================================================
 exit /b 0
 :fail
 echo MCP Harness installation failed.

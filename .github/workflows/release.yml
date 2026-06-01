@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version for the release (e.g. 0.1.0)'
+        description: 'Version for the release (e.g. 0.2.0)'
         required: true
       prerelease:
         description: 'Mark as prerelease'
@@ -24,19 +24,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: win-x64
+          - label: windows-x64
             os: windows-latest
-            platform: win-x64
-          - label: linux-x64
-            os: ubuntu-latest
-            platform: linux-x64
-          - label: macos-arm64
-            os: macos-latest
-            platform: macos-arm64
+            target: win
+            arch: x64
           - label: macos-x64
             os: macos-13
-            platform: macos-x64
+            target: mac
+            arch: x64
+          - label: macos-arm64
+            os: macos-latest
+            target: mac
+            arch: arm64
+          - label: linux-x64
+            os: ubuntu-latest
+            target: linux
+            arch: x64
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,31 +57,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Determine version
-        id: version
-        shell: bash
+      - name: Build Electron desktop app
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            npx --no-install electron-builder --win --x64 --publish never
+          elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            npx --no-install electron-builder --linux --x64 --publish never
           else
-            VERSION=${{ inputs.version }}
+            npx --no-install electron-builder --mac --${{ matrix.arch }} --publish never
           fi
-          if [ -z "$VERSION" ]; then
-            echo "::error::Version is required (use a v* tag or workflow_dispatch input)."
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ''
 
-      - name: Build SEA executable
-        run: node scripts/make-release.mjs --platform=${{ matrix.platform }}
-
-      - name: Upload executable artifact
+      - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-harness-${{ steps.version.outputs.version }}-${{ matrix.label }}
+          name: mcp-harness-${{ matrix.label }}
           path: |
-            release/mcp-harness-${{ steps.version.outputs.version }}-${{ matrix.label }}
-            release/mcp-harness-${{ steps.version.outputs.version }}-${{ matrix.label }}.exe
+            release/desktop/*.exe
+            release/desktop/*.dmg
+            release/desktop/*.AppImage
+            release/desktop/*.zip
+            release/desktop/*.blockmap
+            release/desktop/latest-mac.yml
+            release/desktop/latest-linux.yml
           if-no-files-found: error
           retention-days: 7
 
@@ -109,6 +116,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: List artifacts
+        working-directory: artifacts
+        run: |
+          echo "--- artifacts ---"
+          ls -la
 
       - name: Compute SHA256SUMS
         working-directory: artifacts

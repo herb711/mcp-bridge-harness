@@ -3,14 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { build } from 'esbuild';
-import postjectModule from 'postject';
 
-const SEA_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 const root = process.cwd();
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const releaseRoot = path.join(root, 'release');
-const stagingRoot = path.join(releaseRoot, 'staging');
+const releaseRoot = path.join(root, 'release', 'desktop');
 
 function parseArgs(argv) {
   const out = {};
@@ -35,153 +31,95 @@ function parseArgs(argv) {
 }
 
 function hostPlatform() {
-  const arch = os.arch();
-  if (!['x64', 'arm64'].includes(arch)) {
-    throw new Error(`Unsupported architecture for executable build: ${arch}`);
-  }
-
   switch (process.platform) {
     case 'win32':
-      return `win-${arch}`;
-    case 'linux':
-      return `linux-${arch}`;
+      return 'win';
     case 'darwin':
-      return `macos-${arch}`;
+      return 'mac';
+    case 'linux':
+      return 'linux';
     default:
-      throw new Error(`Unsupported platform for executable build: ${process.platform}`);
+      throw new Error(`Unsupported host platform: ${process.platform}`);
   }
 }
 
-function expectedHost(platform) {
-  const [osName, arch] = platform.split('-');
-  const platformName = osName === 'win' ? 'win32' : osName === 'macos' ? 'darwin' : osName;
-  return { platformName, arch };
-}
-
-function assertNativeBuild(platform) {
-  const expected = expectedHost(platform);
-  if (process.platform !== expected.platformName || os.arch() !== expected.arch) {
-    throw new Error(
-      `SEA builds are native-only. Requested ${platform}, but this runner is ${process.platform}-${os.arch()}.`,
-    );
+function ensureBuilt() {
+  const apiPath = path.join(root, 'dist', 'harness', 'api.js');
+  if (!fs.existsSync(apiPath)) {
+    throw new Error(`Missing ${apiPath}. Run \`npm run build\` first.`);
+  }
+  const webPath = path.join(root, 'web', 'index.html');
+  if (!fs.existsSync(webPath)) {
+    throw new Error(`Missing ${webPath}.`);
+  }
+  if (!fs.existsSync(path.join(root, 'desktop', 'main.cjs'))) {
+    throw new Error('Missing desktop/main.cjs.');
   }
 }
 
-
-function copyDirRecursive(src, dest) {
-  fs.rmSync(dest, { recursive: true, force: true });
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const from = path.join(src, entry.name);
-    const to = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDirRecursive(from, to);
-    else fs.copyFileSync(from, to);
-  }
+function electronBuilderCli() {
+  const local = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder');
+  if (fs.existsSync(local)) return local;
+  return 'electron-builder';
 }
 
-function outputName(platform) {
-  const extension = platform.startsWith('win-') ? '.exe' : '';
-  return `${pkg.name}-${pkg.version}-${platform}${extension}`;
+function runElectronBuilder(platform, args = []) {
+  fs.mkdirSync(releaseRoot, { recursive: true });
+  const cli = electronBuilderCli();
+  const cliArgs = ['--' + platform, '--publish', 'never', ...args];
+  console.log(`> ${cli} ${cliArgs.join(' ')}`);
+  execFileSync(cli, cliArgs, { cwd: root, stdio: 'inherit', env: process.env });
 }
 
-function runNode(args) {
-  execFileSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
+function listArtifacts() {
+  if (!fs.existsSync(releaseRoot)) return [];
+  return fs.readdirSync(releaseRoot).filter((name) => {
+    if (name.endsWith('.yml') || name.endsWith('.json') || name.endsWith('.blockmap')) return false;
+    return fs.statSync(path.join(releaseRoot, name)).isFile();
+  });
 }
 
-function findWindowsSignTool() {
-  const candidates = [];
-  if (process.env.SIGNTOOL_PATH) candidates.push(process.env.SIGNTOOL_PATH);
-
-  for (const base of [
-    'C:\\Program Files (x86)\\Windows Kits\\10\\bin',
-    'C:\\Program Files\\Windows Kits\\10\\bin',
-  ]) {
-    if (!fs.existsSync(base)) continue;
-    for (const version of fs.readdirSync(base).sort().reverse()) {
-      candidates.push(path.join(base, version, os.arch() === 'arm64' ? 'arm64' : 'x64', 'signtool.exe'));
-    }
-  }
-
-  return candidates.find((candidate) => candidate && fs.existsSync(candidate));
-}
-
-function removeWindowsSignature(executableFile) {
-  const signtool = findWindowsSignTool();
-  if (!signtool) {
-    console.warn('signtool.exe was not found; continuing with SEA injection without removing the Node signature first.');
+function printSummary() {
+  const artifacts = listArtifacts();
+  if (artifacts.length === 0) {
+    console.warn(`No artifacts found under ${releaseRoot}.`);
     return;
   }
-  execFileSync(signtool, ['remove', '/s', executableFile], { stdio: 'inherit' });
-}
-
-async function makeExecutable(platform) {
-  assertNativeBuild(platform);
-
-  const buildDir = path.join(stagingRoot, platform);
-  const bundleFile = path.join(buildDir, 'index.cjs');
-  const seaConfigFile = path.join(buildDir, 'sea-config.json');
-  const seaBlobFile = path.join(buildDir, 'sea-prep.blob');
-  const executableFile = path.join(releaseRoot, outputName(platform));
-
-  fs.rmSync(buildDir, { recursive: true, force: true });
-  fs.mkdirSync(buildDir, { recursive: true });
-  fs.mkdirSync(releaseRoot, { recursive: true });
-  fs.rmSync(executableFile, { force: true });
-
-  await build({
-    entryPoints: [path.join(root, 'src', 'index.ts')],
-    outfile: bundleFile,
-    bundle: true,
-    platform: 'node',
-    target: `node${process.versions.node.split('.')[0]}`,
-    format: 'cjs',
-    sourcemap: false,
-    minify: false,
-    logLevel: 'info',
-  });
-
-  fs.writeFileSync(
-    seaConfigFile,
-    JSON.stringify({
-      main: bundleFile,
-      output: seaBlobFile,
-      disableExperimentalSEAWarning: true,
-      useCodeCache: false,
-      useSnapshot: false,
-    }, null, 2),
-  );
-
-  runNode(['--experimental-sea-config', seaConfigFile]);
-  fs.copyFileSync(process.execPath, executableFile);
-  if (process.platform !== 'win32') fs.chmodSync(executableFile, 0o755);
-
-  if (process.platform === 'darwin') {
-    execFileSync('codesign', ['--remove-signature', executableFile], { stdio: 'ignore' });
-  } else if (process.platform === 'win32') {
-    removeWindowsSignature(executableFile);
+  console.log(`\nMCP Harness desktop artifacts in ${releaseRoot}:`);
+  for (const name of artifacts) {
+    const full = path.join(releaseRoot, name);
+    const size = fs.statSync(full).size;
+    const sizeMb = (size / 1024 / 1024).toFixed(1);
+    console.log(`  - ${name}  (${sizeMb} MB)`);
   }
-
-  const { inject } = postjectModule;
-  await inject(executableFile, 'NODE_SEA_BLOB', fs.readFileSync(seaBlobFile), {
-    machoSegmentName: process.platform === 'darwin' ? 'NODE_SEA' : undefined,
-    sentinelFuse: SEA_FUSE,
-  });
-
-  if (process.platform === 'darwin') {
-    execFileSync('codesign', ['--force', '--sign', '-', executableFile], { stdio: 'inherit' });
-  }
-
-  execFileSync(executableFile, ['--tools'], { stdio: 'ignore' });
-  copyDirRecursive(path.join(root, 'web'), path.join(releaseRoot, 'web'));
-  console.log(`Executable written to ${executableFile}`);
-  console.log(`Web UI assets copied to ${path.join(releaseRoot, 'web')}`);
 }
 
 const args = parseArgs(process.argv);
 const platform = String(args.platform || hostPlatform());
 
-if (platform === 'macos-universal') {
-  throw new Error('Build macos-x64 and macos-arm64 first, then combine them with lipo in GitHub Actions.');
+ensureBuilt();
+
+if (platform === 'win' || platform === 'all') {
+  runElectronBuilder('win', ['--x64']);
+}
+if (platform === 'mac' || platform === 'all') {
+  runElectronBuilder('mac');
+}
+if (platform === 'linux' || platform === 'all') {
+  runElectronBuilder('linux', ['--x64']);
 }
 
-await makeExecutable(platform);
+if (!['win', 'mac', 'linux', 'all'].includes(platform)) {
+  throw new Error(`Unknown --platform value: ${platform}. Use win | mac | linux | all.`);
+}
+
+printSummary();
+
+console.log(`\nDone. Artifacts written to: ${releaseRoot}`);
+console.log(`\nMCP Harness ${pkg.version} packaged as a real desktop app:`);
+console.log('  - Windows: NSIS installer + portable .exe (creates Desktop + Start Menu shortcuts)');
+console.log('  - macOS:   .dmg (drag to Applications)');
+console.log('  - Linux:   AppImage (chmod +x to run)');
+if (process.platform === 'win32') {
+  console.log('\nNext: run the NSIS installer to install, then double-click the "MCP Harness" shortcut on the Desktop.');
+}

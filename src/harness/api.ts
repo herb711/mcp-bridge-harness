@@ -3,6 +3,7 @@ import { appDataDir, commandDisplay, defaultOpenCodeConfigPath, logPath, secrets
 import { applyOpenCodeConfig, previewOpenCodeConfig } from "./opencode.js";
 import { probeBundledMcp, type ProbeMode } from "./probe.js";
 import { ensureDefaultInstall, getEffectiveEnv, maskEnv, readState, updateMcpProfile } from "./state.js";
+import { ensureMcpShim, isElectronPackaged, mcpShimPath, packagedRuntime } from "./shim.js";
 
 export interface HarnessApiRequest {
   path: string;
@@ -77,10 +78,22 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
 
   if (method === "GET" && url.pathname === "/api/status") {
     const state = await readState();
+    const runtime = packagedRuntime();
+    let shimPath: string | null = null;
+    if (isElectronPackaged()) {
+      try {
+        shimPath = await ensureMcpShim();
+      } catch (error) {
+        shimPath = mcpShimPath();
+      }
+    }
     return {
       app: "MCP Harness",
-      version: "0.1.0",
+      version: "0.2.0",
       mode: "desktop",
+      packaged: isElectronPackaged(),
+      installDir: runtime?.installDir || null,
+      shimPath,
       dataDir: appDataDir(),
       statePath: statePath(),
       secretsPath: secretsPath(),
@@ -156,6 +169,14 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
     }
     const result = await applyOpenCodeConfig({ mcpId, profileId, enabled });
     return { ok: true, ...result };
+  }
+
+  if (method === "POST" && url.pathname === "/api/runtime/shim") {
+    if (!isElectronPackaged()) {
+      return { ok: false, error: "Shim is only used in the packaged desktop build." };
+    }
+    const shimPath = await ensureMcpShim();
+    return { ok: true, shimPath };
   }
 
   return undefined;
