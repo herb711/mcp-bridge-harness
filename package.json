@@ -1,6 +1,6 @@
 {
   "name": "mcp-harness",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A local MCP manager and marketplace harness for OpenCode, Codex, Claude Code and bundled MiniMax MCP tools.",
   "type": "module",
   "author": "MCP Harness",
