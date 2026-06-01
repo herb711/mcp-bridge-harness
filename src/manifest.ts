@@ -59,12 +59,13 @@ export function getAgentManifest() {
         inputSchema: tool.inputSchema,
       })),
       artifacts: ["audio", "image", "video", "music", "json"],
-      providers: ["minimax-token-plan-mcp", "minimax-http", "minimax-websocket"],
+      providers: ["minimax-official-mcp-js", "minimax-token-plan-mcp", "minimax-http", "minimax-websocket"],
     },
     security: {
       permissions: ["network:minimax", "file:write:artifacts", "secret:read:harness-profile"],
       notes: [
         "OpenCode config receives a local command and MCP_HARNESS_HOME only; MiniMax API keys are stored in the local Harness profile.",
+        "Generation tools supported by minimax-mcp-js are proxied to the official MiniMax MCP first when the request is compatible.",
         "The MCP server must not print diagnostics to stdout because stdout is reserved for MCP JSON-RPC.",
         "Generated files are written under MINIMAX_MCP_BASE_PATH unless output_directory is provided per tool.",
       ],

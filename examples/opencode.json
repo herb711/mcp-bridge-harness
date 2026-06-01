@@ -12,7 +12,7 @@
         "default"
       ],
       "enabled": true,
-      "timeout": 15000,
+      "timeout": 120000,
       "environment": {
         "MCP_HARNESS_HOME": "/absolute/path/to/McpHarness"
       }

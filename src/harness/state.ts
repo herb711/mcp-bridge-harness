@@ -42,6 +42,12 @@ export interface HarnessSecrets {
   updatedAt: string;
 }
 
+export interface McpProfileStatus {
+  configured: boolean;
+  missingRequiredKeys: string[];
+  hasProfile: boolean;
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -128,6 +134,10 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
         MINIMAX_API_HOST: "https://api.minimaxi.com",
         MINIMAX_MCP_BASE_PATH: defaultOutputPath(),
         MINIMAX_T2A_MODE: "async",
+        MINIMAX_ENABLE_OFFICIAL_MCP_PROXY: "true",
+        MINIMAX_OFFICIAL_MCP_COMMAND: "npx",
+        MINIMAX_OFFICIAL_MCP_ARGS: "[\"-y\",\"minimax-mcp-js\"]",
+        MINIMAX_OFFICIAL_MCP_TIMEOUT_MS: "600000",
         MINIMAX_ENABLE_TOKEN_PLAN_PROXY: "true",
         MINIMAX_PLAN_MCP_COMMAND: "uvx",
         MINIMAX_PLAN_MCP_ARGS: "[\"minimax-coding-plan-mcp\", \"-y\"]",
@@ -136,6 +146,22 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
       targetHarnesses: ["opencode"],
     };
     changed = true;
+  }
+
+  const installed = state.installed["minimax-bridge"];
+  if (installed) {
+    const envDefaults: Record<string, string> = {
+      MINIMAX_ENABLE_OFFICIAL_MCP_PROXY: "true",
+      MINIMAX_OFFICIAL_MCP_COMMAND: "npx",
+      MINIMAX_OFFICIAL_MCP_ARGS: "[\"-y\",\"minimax-mcp-js\"]",
+      MINIMAX_OFFICIAL_MCP_TIMEOUT_MS: "600000",
+    };
+    for (const [key, value] of Object.entries(envDefaults)) {
+      if (installed.env[key] == null || installed.env[key] === "") {
+        installed.env[key] = value;
+        changed = true;
+      }
+    }
   }
 
   const profileKey = profileKeyFor("minimax-bridge", "default");
@@ -151,6 +177,30 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
 
 export function profileKeyFor(mcpId: string, profileId: string): string {
   return `${mcpId}:${profileId}`;
+}
+
+function requiredProfileKeys(mcpId: string): string[] {
+  return (getCatalogEntry(mcpId)?.fields || [])
+    .filter((field) => field.required)
+    .map((field) => field.key);
+}
+
+export async function getMcpProfileStatus(mcpId: string, profileId = "default"): Promise<McpProfileStatus> {
+  const state = await readState();
+  const secrets = await readSecrets();
+  const installed = state.installed[mcpId];
+  const profileKey = profileKeyFor(mcpId, profileId);
+  const profile = secrets.profiles[profileKey] || {};
+  const env = {
+    ...(installed?.env || {}),
+    ...profile,
+  };
+  const missingRequiredKeys = requiredProfileKeys(mcpId).filter((key) => !String(env[key] || "").trim());
+  return {
+    configured: Boolean(installed) && missingRequiredKeys.length === 0,
+    missingRequiredKeys,
+    hasProfile: Boolean(secrets.profiles[profileKey]),
+  };
 }
 
 export async function getEffectiveEnv(mcpId: string, profileId = "default"): Promise<Record<string, string>> {

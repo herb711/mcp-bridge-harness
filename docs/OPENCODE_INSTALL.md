@@ -45,7 +45,7 @@ MCP Harness 会合并 `mcp.minimax-bridge`：
         "default"
       ],
       "enabled": true,
-      "timeout": 15000,
+      "timeout": 120000,
       "environment": {
         "MCP_HARNESS_HOME": "/absolute/path/to/McpHarness"
       }

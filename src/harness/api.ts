@@ -2,7 +2,7 @@ import { BUILTIN_CATALOG, getCatalogEntry } from "./catalog.js";
 import { appDataDir, commandDisplay, defaultOpenCodeConfigPath, logPath, secretsPath, statePath } from "./paths.js";
 import { applyOpenCodeConfig, previewOpenCodeConfig } from "./opencode.js";
 import { probeBundledMcp, type ProbeMode } from "./probe.js";
-import { ensureDefaultInstall, getEffectiveEnv, maskEnv, readState, updateMcpProfile } from "./state.js";
+import { ensureDefaultInstall, getEffectiveEnv, getMcpProfileStatus, maskEnv, readState, updateMcpProfile } from "./state.js";
 import { ensureMcpShim, isElectronPackaged, mcpShimPath, packagedRuntime } from "./shim.js";
 
 export interface HarnessApiRequest {
@@ -15,6 +15,7 @@ export interface HarnessTargetSummary {
   id: string;
   name: string;
   status: "ready" | "reserved";
+  configured?: boolean;
   description: string;
   configPage?: string;
 }
@@ -34,13 +35,17 @@ function stringRecord(value: unknown): Record<string, string> {
   return out;
 }
 
-export function supportedHarnesses(): HarnessTargetSummary[] {
+export function supportedHarnesses(clients: Record<string, { enabled?: boolean }> = {}): HarnessTargetSummary[] {
+  const opencodeConfigured = Boolean(clients["opencode:minimax-bridge:default"]?.enabled);
   return [
     {
       id: "opencode",
       name: "OpenCode",
       status: "ready",
-      description: "点击进入 OpenCode 配置页，一键写入 OpenCode 全局 MCP 配置。",
+      configured: opencodeConfigured,
+      description: opencodeConfigured
+        ? "已写入 OpenCode 全局 MCP 配置，可重新打开 OpenCode 使用。"
+        : "可进入 OpenCode 配置页，写入全局 MCP 配置。",
       configPage: "configure",
     },
     {
@@ -78,6 +83,9 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
 
   if (method === "GET" && url.pathname === "/api/status") {
     const state = await readState();
+    const profileStatuses = await Promise.all(
+      Object.values(state.installed).map((item) => getMcpProfileStatus(item.id, item.profileId)),
+    );
     const runtime = packagedRuntime();
     let shimPath: string | null = null;
     if (isElectronPackaged()) {
@@ -99,8 +107,10 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
       secretsPath: secretsPath(),
       logPath: logPath(),
       opencodeConfigPath: defaultOpenCodeConfigPath(),
-      installedCount: Object.keys(state.installed).length,
-      supportedHarnesses: supportedHarnesses(),
+      installedCount: profileStatuses.filter((item) => item.configured).length,
+      configuredMcpCount: profileStatuses.filter((item) => item.configured).length,
+      availableMcpCount: Object.keys(state.installed).length,
+      supportedHarnesses: supportedHarnesses(state.clients),
     };
   }
 
@@ -113,8 +123,10 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
     const installed = [];
     for (const item of Object.values(state.installed)) {
       const env = await getEffectiveEnv(item.id, item.profileId);
+      const profileStatus = await getMcpProfileStatus(item.id, item.profileId);
       installed.push({
         ...item,
+        ...profileStatus,
         command: commandDisplay((await previewOpenCodeConfig({ mcpId: item.id, profileId: item.profileId })).entry.command),
         effectiveEnv: maskEnv(env, item.secretKeys),
       });

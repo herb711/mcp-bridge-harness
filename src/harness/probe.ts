@@ -55,6 +55,15 @@ function redactSensitive(value: unknown): unknown {
   return out;
 }
 
+function probeFailed(value: unknown): boolean {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "ok" in value &&
+    (value as { ok?: unknown }).ok === false
+  );
+}
+
 async function closeQuietly(client: Client | undefined, transport: StdioClientTransport | undefined): Promise<void> {
   await client?.close().catch(() => undefined);
   await transport?.close().catch(() => undefined);
@@ -91,7 +100,7 @@ export async function probeBundledMcp(mode: ProbeMode): Promise<ProbeResult> {
     }, undefined, { timeout: 15000 }));
 
     const result: ProbeResult = {
-      ok: true,
+      ok: !probeFailed(voiceProbe),
       mode,
       command: entry.command,
       tools,
@@ -99,7 +108,7 @@ export async function probeBundledMcp(mode: ProbeMode): Promise<ProbeResult> {
     };
 
     if (mode === "api") {
-      result.apiProbe = parseTextContent(await client.callTool({
+      const apiProbe = parseTextContent(await client.callTool({
         name: "text_to_audio",
         arguments: {
           text: "MiniMax MCP test.",
@@ -108,6 +117,8 @@ export async function probeBundledMcp(mode: ProbeMode): Promise<ProbeResult> {
           transport: "async",
         },
       }, undefined, { timeout: 30000 }));
+      result.apiProbe = apiProbe;
+      if (probeFailed(apiProbe)) result.ok = false;
     }
 
     return result;

@@ -14,7 +14,7 @@ const asyncModeProperty = {
 export const TOOLS: Tool[] = [
   {
     name: "web_search",
-    description: "Token Plan branch. Proxy to MiniMax Token Plan MCP web_search. Search the web for a query and return results/suggestions.",
+    description: "Token Plan branch. Proxy to MiniMax Token Plan MCP web_search. Use automatically whenever the user needs current, external, or web information.",
     inputSchema: {
       type: "object",
       properties: {
@@ -25,14 +25,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "understand_image",
-    description: "Token Plan branch. Proxy to MiniMax Token Plan MCP understand_image. Analyze an image by URL or local path.",
+    description: "Token Plan branch. Proxy to MiniMax Token Plan MCP understand_image. Use automatically whenever the user asks to analyze, describe, compare, OCR, or extract information from an image, screenshot, logo, or visual file path/URL.",
     inputSchema: {
       type: "object",
       properties: {
         prompt: { type: "string", description: "Question or analysis instruction for the image." },
-        image_url: { type: "string", description: "HTTP/HTTPS URL or local path for the image." },
+        image_source: { type: "string", description: "HTTP/HTTPS URL, data URL, file:// URL, or local JPEG/PNG/WebP path. If the path starts with @, the bridge strips the prefix." },
       },
-      required: ["prompt", "image_url"],
+      required: ["prompt", "image_source"],
     },
   },
   {

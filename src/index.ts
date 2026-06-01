@@ -14,6 +14,8 @@ import { ArtifactStore } from "./artifacts.js";
 import { loadConfig } from "./config.js";
 import { errorToJson } from "./errors.js";
 import { MiniMaxHttpClient } from "./minimaxHttp.js";
+import { enhanceImageToolResult, isCallToolResult, toCallToolResult } from "./mcpResults.js";
+import { OfficialMiniMaxProxy } from "./officialMiniMaxProxy.js";
 import { TokenPlanProxy } from "./tokenPlanProxy.js";
 import { TOOLS } from "./toolSchemas.js";
 import { getAgentManifest } from "./manifest.js";
@@ -103,23 +105,12 @@ async function runMcpServer(): Promise<void> {
   const store = new ArtifactStore(config.basePath);
   const minimax = new MiniMaxHttpClient(config, store);
   const tokenPlan = new TokenPlanProxy(config);
+  const officialMiniMax = new OfficialMiniMaxProxy(config);
 
   const server = new Server(
     { name: "minimax-bridge-mcp", version: "0.2.0-harness.1" },
     { capabilities: { tools: {} } },
   );
-
-  function asJsonContent(value: unknown, isError = false): CallToolResult {
-    return {
-      isError,
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(value, null, 2),
-        },
-      ],
-    };
-  }
 
   async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
     switch (name) {
@@ -129,22 +120,30 @@ async function runMcpServer(): Promise<void> {
       case "understand_image":
         return tokenPlan.callTool("understand_image", args);
 
-      // HTTP/WebSocket branch. These tools call MiniMax public APIs directly.
+      // Official MiniMax MCP branch first where its tool surface matches our request.
+      // Extended or unsupported requests fall through to our HTTP/WebSocket implementation.
       case "text_to_audio":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.textToAudio(args);
       case "query_text_to_audio":
         return minimax.queryTextToAudio(args);
       case "list_voices":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.listVoices(args);
       case "voice_clone":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.voiceClone(args);
       case "text_to_image":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.textToImage(args);
       case "generate_video":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.generateVideo(args);
       case "image_to_video":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.generateVideo(args);
       case "query_video_generation":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.queryVideoGeneration(args);
       case "video_template_generation":
         return minimax.videoTemplateGeneration(args);
@@ -153,6 +152,7 @@ async function runMcpServer(): Promise<void> {
       case "lyrics_generation":
         return minimax.lyricsGeneration(args);
       case "music_generation":
+        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.musicGeneration(args);
       case "music_cover_preprocess":
         return minimax.musicCoverPreprocess(args);
@@ -168,21 +168,25 @@ async function runMcpServer(): Promise<void> {
       const result = await dispatchTool(request.params.name, request.params.arguments ?? {});
 
       // If a proxied child MCP already returned a valid MCP CallToolResult, pass it through.
-      if (result && typeof result === "object" && "content" in result) {
-        return result as CallToolResult;
+      if (isCallToolResult(result)) {
+        return request.params.name === "text_to_image"
+          ? enhanceImageToolResult(result)
+          : result;
       }
-      return asJsonContent(result);
+      return toCallToolResult(request.params.name, result);
     } catch (error) {
-      return asJsonContent(errorToJson(error), true);
+      return toCallToolResult(request.params.name, errorToJson(error), true);
     }
   });
 
   process.on("SIGINT", async () => {
     await tokenPlan.close().catch(() => undefined);
+    await officialMiniMax.close().catch(() => undefined);
     process.exit(0);
   });
   process.on("SIGTERM", async () => {
     await tokenPlan.close().catch(() => undefined);
+    await officialMiniMax.close().catch(() => undefined);
     process.exit(0);
   });
 

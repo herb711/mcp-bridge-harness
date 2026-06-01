@@ -84,6 +84,31 @@ export const BUILTIN_CATALOG: CatalogEntry[] = [
         ],
       },
       {
+        key: "MINIMAX_ENABLE_OFFICIAL_MCP_PROXY",
+        label: "启用官方 MiniMax MCP Proxy",
+        type: "boolean",
+        default: "true",
+        help: "启用后，官方 MiniMax MCP JS 已支持的生成工具会优先转发到官方 MCP；未覆盖或增强能力继续走 Harness HTTPS 分支。",
+      },
+      {
+        key: "MINIMAX_OFFICIAL_MCP_COMMAND",
+        label: "官方 MiniMax MCP 命令",
+        type: "text",
+        default: "npx",
+      },
+      {
+        key: "MINIMAX_OFFICIAL_MCP_ARGS",
+        label: "官方 MiniMax MCP 参数",
+        type: "textarea",
+        default: "[\"-y\",\"minimax-mcp-js\"]",
+      },
+      {
+        key: "MINIMAX_OFFICIAL_MCP_TIMEOUT_MS",
+        label: "官方 MiniMax MCP 超时毫秒",
+        type: "text",
+        default: "600000",
+      },
+      {
         key: "MINIMAX_ENABLE_TOKEN_PLAN_PROXY",
         label: "启用 Token Plan MCP Proxy",
         type: "boolean",

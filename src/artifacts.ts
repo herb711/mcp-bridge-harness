@@ -10,6 +10,21 @@ export interface Artifact {
   url?: string;
 }
 
+export interface ArtifactDescriptor {
+  type: "image" | "audio" | "video" | "json" | "text" | "file";
+  mimeType: string;
+  filename: string;
+  path: string;
+  size: number;
+  source: string;
+  url?: string;
+}
+
+export interface GalleryDescriptor {
+  type: "gallery";
+  items: ArtifactDescriptor[];
+}
+
 const MIME_BY_EXT: Record<string, string> = {
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -55,6 +70,37 @@ export function extensionFromMime(mime: string | null | undefined, fallback: str
 
 export function mimeFromExt(ext: string): string {
   return MIME_BY_EXT[ext.replace(/^\./, "").toLowerCase()] || "application/octet-stream";
+}
+
+export function artifactTypeFromMime(mime: string | undefined): ArtifactDescriptor["type"] {
+  const normalized = (mime || "").split(";")[0]?.trim().toLowerCase() || "";
+  if (normalized.startsWith("image/")) return "image";
+  if (normalized.startsWith("audio/")) return "audio";
+  if (normalized.startsWith("video/")) return "video";
+  if (normalized === "application/json") return "json";
+  if (normalized.startsWith("text/")) return "text";
+  return "file";
+}
+
+export function describeArtifact(artifact: Artifact, source = "minimax"): ArtifactDescriptor {
+  const filePath = path.resolve(artifact.path);
+  const mimeType = artifact.mime || mimeFromExt(path.extname(filePath));
+  return {
+    type: artifactTypeFromMime(mimeType),
+    mimeType,
+    filename: path.basename(filePath),
+    path: filePath,
+    size: artifact.size_bytes,
+    source,
+    ...(artifact.url ? { url: artifact.url } : {}),
+  };
+}
+
+export function describeArtifacts(artifacts: Artifact[], source = "minimax"): ArtifactDescriptor | GalleryDescriptor | undefined {
+  const items = artifacts.map((artifact) => describeArtifact(artifact, source));
+  if (items.length === 0) return undefined;
+  if (items.length === 1) return items[0];
+  return { type: "gallery", items };
 }
 
 export function safeExt(ext: string | undefined, fallback: string): string {

@@ -9,7 +9,7 @@ const state = {
 };
 
 const titles = {
-  dashboard: ["总览", "查看本地 Harness 状态和已安装 MCP。"],
+  dashboard: ["总览", "查看本地 Harness 状态和 MCP 配置。"],
   configure: ["配置 OpenCode", "从 Harness 目标进入，配置 OpenCode 直接使用 MCP。"],
   market: ["MCP 市场", "预留 MCP 下载、安装、健康检查和多 Harness 分发入口。"],
   harnesses: ["Harness 目标", "管理 MCP 要同步到哪些编程工具。"],
@@ -72,7 +72,7 @@ function renderStatus() {
     ["State", status.statePath],
     ["Secrets", status.secretsPath],
     ["OpenCode 配置", status.opencodeConfigPath],
-    ["已安装 MCP", String(status.installedCount ?? 0)],
+    ["已配置 MCP", String(status.configuredMcpCount ?? status.installedCount ?? 0)],
   ];
   kv.innerHTML = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(v || "-")}</dd></div>`).join("");
 }
@@ -80,30 +80,36 @@ function renderStatus() {
 function renderInstalled() {
   const list = $("#installedList");
   if (!state.installed.length) {
-    list.innerHTML = `<p class="muted">还没有安装 MCP。</p>`;
+    list.innerHTML = `<p class="muted">还没有可配置的 MCP。</p>`;
     return;
   }
-  list.innerHTML = state.installed.map((item) => `
-    <article class="installed-card">
-      <header>
-        <div>
-          <strong>${escapeHtml(item.displayName)}</strong>
-          <p class="muted">${escapeHtml(item.id)} · ${escapeHtml(item.version)}</p>
+  list.innerHTML = state.installed.map((item) => {
+    const configured = item.configured === true;
+    const missing = (item.missingRequiredKeys || []).join(" / ");
+    return `
+      <article class="installed-card">
+        <header>
+          <div>
+            <strong>${escapeHtml(item.displayName)}</strong>
+            <p class="muted">${escapeHtml(item.id)} · ${escapeHtml(item.version)}</p>
+          </div>
+          <span class="badge ${configured ? "ok" : "warn"}">${configured ? "已配置" : "待配置"}</span>
+        </header>
+        <p class="muted">${configured ? "Profile 已保存必要配置。" : `缺少：${escapeHtml(missing || "必要配置")}`}</p>
+        <p class="muted">命令：<code>${escapeHtml(item.command || "")}</code></p>
+        <div class="tags">
+          ${(item.targetHarnesses || []).map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("")}
         </div>
-        <span class="badge ok">已安装</span>
-      </header>
-      <p class="muted">命令：<code>${escapeHtml(item.command || "")}</code></p>
-      <div class="tags">
-        ${(item.targetHarnesses || []).map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("")}
-      </div>
-    </article>
-  `).join("");
+      </article>
+    `;
+  }).join("");
 }
 
 function renderMarket() {
   const grid = $("#marketGrid");
   grid.innerHTML = state.catalog.map((item) => {
     const ready = item.status === "bundled" || item.status === "available";
+    const bundled = item.status === "bundled";
     return `
       <article class="market-card">
         <header>
@@ -117,7 +123,7 @@ function renderMarket() {
         <div class="tags">${item.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
         <p class="small">支持：${item.supportedHarnesses.map(escapeHtml).join(" / ")}</p>
         <div class="actions">
-          <button class="secondary" data-install="${escapeHtml(item.id)}">${ready ? "安装/确认安装" : "查看预留"}</button>
+          <button class="secondary" ${bundled ? `data-configure-mcp="${escapeHtml(item.id)}"` : `data-install="${escapeHtml(item.id)}"`}>${bundled ? "进入配置" : ready ? "安装" : "查看预留"}</button>
         </div>
       </article>
     `;
@@ -129,6 +135,7 @@ function renderHarnesses() {
   const items = state.status?.supportedHarnesses || [];
   list.innerHTML = items.map((item) => {
     const ready = item.status === "ready";
+    const configured = ready && item.configured === true;
     return `
       <article class="harness-card ${ready ? "clickable" : ""}" data-harness-id="${escapeHtml(item.id)}">
         <header>
@@ -136,7 +143,7 @@ function renderHarnesses() {
             <strong>${escapeHtml(item.name)}</strong>
             <p class="muted">${escapeHtml(item.id)}</p>
           </div>
-          <span class="badge ${ready ? "ok" : "warn"}">${ready ? "已实现" : "已预留"}</span>
+          <span class="badge ${configured ? "ok" : "warn"}">${configured ? "已配置" : ready ? "可配置" : "已预留"}</span>
         </header>
         <p class="muted">${escapeHtml(item.description || (ready ? "可以一键写入全局配置。" : "后续版本实现对应 Adapter。"))}</p>
         ${ready && item.id === "opencode" ? `
@@ -170,6 +177,7 @@ async function renderPreview() {
   const preview = await api("/api/harness/opencode/preview?mcpId=minimax-bridge&profileId=default");
   $("#opencodePreview").textContent = JSON.stringify({
     path: preview.configPath,
+    instructions: [preview.instructionRef],
     mcp: {
       "minimax-bridge": preview.entry,
     },
@@ -205,6 +213,7 @@ function collectForm() {
     if (secretKeys.has(key)) secrets[key] = value;
     else env[key] = value;
   }
+  env.MINIMAX_ENABLE_OFFICIAL_MCP_PROXY = form.elements.MINIMAX_ENABLE_OFFICIAL_MCP_PROXY.checked ? "true" : "false";
   env.MINIMAX_ENABLE_TOKEN_PLAN_PROXY = form.elements.MINIMAX_ENABLE_TOKEN_PLAN_PROXY.checked ? "true" : "false";
   return { env, secrets };
 }
@@ -227,7 +236,13 @@ async function runProbe(mode) {
     body: JSON.stringify({ mode }),
   });
   $("#probeResult").textContent = JSON.stringify(result, null, 2);
-  showAlert(mode === "api" ? "MiniMax API 测试通过。" : "MCP 启动和工具探测通过。", "ok");
+  const passed = result.ok !== false;
+  showAlert(
+    passed
+      ? (mode === "api" ? "MiniMax API 测试通过。" : "MCP 启动和工具探测通过。")
+      : (mode === "api" ? "MiniMax API 测试未通过，请检查 API Key。" : "MCP 启动或工具探测未通过。"),
+    passed ? "ok" : "error",
+  );
 }
 
 async function applyOpenCode(event) {
@@ -261,6 +276,11 @@ $("#testStartupBtn").addEventListener("click", () => runProbe("startup").catch((
 $("#testApiBtn").addEventListener("click", () => runProbe("api").catch((error) => showAlert(error.message, "error")));
 $("#minimaxForm").addEventListener("submit", (event) => applyOpenCode(event).catch((error) => showAlert(error.message, "error")));
 $("#marketGrid").addEventListener("click", async (event) => {
+  const configureButton = event.target.closest("[data-configure-mcp]");
+  if (configureButton?.dataset.configureMcp === "minimax-bridge") {
+    switchPage("configure");
+    return;
+  }
   const button = event.target.closest("[data-install]");
   if (!button) return;
   try {
@@ -269,7 +289,7 @@ $("#marketGrid").addEventListener("click", async (event) => {
       body: JSON.stringify({ mcpId: button.dataset.install }),
     });
     await loadAll();
-    showAlert(result.installed ? "MCP 已安装或已确认安装。" : result.reason, result.installed ? "ok" : "error");
+    showAlert(result.installed ? "MCP 已添加到配置列表。" : result.reason, result.installed ? "ok" : "error");
   } catch (error) {
     showAlert(error.message, "error");
   }

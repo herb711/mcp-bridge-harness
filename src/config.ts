@@ -15,6 +15,10 @@ export interface Config {
   tokenPlanApiKey: string;
   tokenPlanCommand: string;
   tokenPlanArgs: string[];
+  enableOfficialMcpProxy: boolean;
+  officialMcpCommand: string;
+  officialMcpArgs: string[];
+  officialMcpTimeoutMs: number;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -72,5 +76,9 @@ export function loadConfig(): Config {
     tokenPlanApiKey: process.env.MINIMAX_PLAN_API_KEY || process.env.MINIMAX_API_KEY || "",
     tokenPlanCommand: process.env.MINIMAX_PLAN_MCP_COMMAND || "uvx",
     tokenPlanArgs: parseArgs(process.env.MINIMAX_PLAN_MCP_ARGS, ["minimax-coding-plan-mcp", "-y"]),
+    enableOfficialMcpProxy: boolFromEnv("MINIMAX_ENABLE_OFFICIAL_MCP_PROXY", true),
+    officialMcpCommand: process.env.MINIMAX_OFFICIAL_MCP_COMMAND || "npx",
+    officialMcpArgs: parseArgs(process.env.MINIMAX_OFFICIAL_MCP_ARGS, ["-y", "minimax-mcp-js"]),
+    officialMcpTimeoutMs: numberFromEnv("MINIMAX_OFFICIAL_MCP_TIMEOUT_MS", 600_000),
   };
 }

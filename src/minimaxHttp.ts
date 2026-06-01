@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import WebSocket from "ws";
-import { ArtifactStore, type Artifact, extensionFromMime, mimeFromExt, safeExt } from "./artifacts.js";
+import { ArtifactStore, type Artifact, describeArtifact, extensionFromMime, mimeFromExt, safeExt } from "./artifacts.js";
 import type { Config } from "./config.js";
 import { MiniMaxApiError, UserInputError } from "./errors.js";
 import { SYSTEM_VOICES } from "./systemVoices.js";
@@ -535,7 +535,24 @@ export class MiniMaxHttpClient {
       artifacts.push(await this.downloadUrlAsArtifact(url, { subdir: "images", outputDirectory: input.output_directory, prefix: `text_to_image_url_${index + 1}`, auth: false }));
     }
 
-    return { ok: true, backend: "http", tool: "text_to_image", artifacts, raw };
+    const imageItems = artifacts
+      .map((artifact) => describeArtifact(artifact, "minimax"))
+      .filter((artifact) => artifact.type === "image");
+    const artifact = imageItems.length === 1
+      ? imageItems[0]
+      : imageItems.length > 1
+        ? { type: "gallery" as const, items: imageItems }
+        : undefined;
+
+    return {
+      ok: true,
+      backend: "http",
+      tool: "text_to_image",
+      ...(artifact ? { artifact } : {}),
+      paths: artifacts.map((item) => item.path),
+      artifacts,
+      raw,
+    };
   }
 
   async generateVideo(args: unknown) {
