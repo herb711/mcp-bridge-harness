@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "redou.plugin/v1",
+  "id": "mcp-harness",
+  "name": "MCP Harness",
+  "version": "0.1.0",
+  "description": "Local MCP manager with a visual UI, a bundled MiniMax Bridge MCP, OpenCode auto-configuration, and a reserved MCP marketplace.",
+  "entry": {
+    "type": "node",
+    "command": "node",
+    "args": ["dist/index.js", "harness"]
+  },
+  "bundledMcp": [
+    {
+      "id": "minimax-bridge",
+      "command": ["node", "dist/index.js", "mcp", "minimax-bridge", "--profile", "default"],
+      "supportedHarnesses": ["opencode"]
+    }
+  ]
+}

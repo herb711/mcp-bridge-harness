@@ -1,0 +1,61 @@
+{
+  "name": "mcp-harness",
+  "version": "0.1.0",
+  "description": "A local MCP manager and marketplace harness for OpenCode, Codex, Claude Code and bundled MiniMax MCP tools.",
+  "type": "module",
+  "bin": {
+    "mcp-harness": "./dist/index.js",
+    "minimax-bridge-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "npm run app:dev",
+    "dev:mcp": "tsx src/index.ts mcp minimax-bridge",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js app",
+    "harness": "node dist/index.js app",
+    "harness:install": "node dist/index.js install",
+    "harness:install:open": "node dist/index.js install --open",
+    "mcp:minimax": "node dist/index.js mcp minimax-bridge",
+    "manifest": "node dist/index.js --manifest",
+    "tools": "node dist/index.js --tools",
+    "configure": "node scripts/configure.mjs --write-files --copy --print",
+    "install:opencode": "node dist/index.js app",
+    "release:local": "node scripts/make-release.mjs",
+    "prepare:release": "npm run build && node scripts/generate-agent-manifest.mjs && npm run release:local",
+    "app:dev": "npm run build && electron desktop/main.cjs",
+    "app": "node dist/index.js app",
+    "desktop": "node dist/index.js app",
+    "serve": "node dist/index.js serve",
+    "web": "node dist/index.js serve"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.28.0",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "electron": "^33.0.0"
+  },
+  "files": [
+    "dist",
+    "web",
+    "desktop",
+    "scripts",
+    "install.bat",
+    "install.sh",
+    "examples",
+    "docs",
+    "agent.manifest.json",
+    "README.md",
+    "LICENSE"
+  ]
+}

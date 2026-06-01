@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MCP Harness</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script>window.__MCP_HARNESS_TOKEN__ = "%HARNESS_TOKEN%";</script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">H</div>
+        <div>
+          <strong>MCP Harness</strong>
+          <span>Local MCP Manager</span>
+        </div>
+      </div>
+      <nav>
+        <button class="nav active" data-page="dashboard">总览</button>
+        <button class="nav" data-page="market">MCP 市场</button>
+        <button class="nav" data-page="harnesses">Harness 目标</button>
+      </nav>
+      <div class="side-note">
+        <strong>v0.1</strong>
+        <span>当前已实现 MiniMax Bridge MCP。OpenCode 配置入口在「Harness 目标 → OpenCode」。</span>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">总览</h1>
+          <p id="pageSubtitle">查看本地 Harness 状态和已安装 MCP。</p>
+        </div>
+        <button id="refreshBtn" class="ghost">刷新</button>
+      </header>
+
+      <section id="alert" class="alert hidden"></section>
+
+      <section class="page" id="dashboard">
+        <div class="grid two">
+          <article class="card">
+            <h2>本地 Harness</h2>
+            <dl class="kv" id="statusKv"></dl>
+          </article>
+          <article class="card">
+            <h2>已安装 MCP</h2>
+            <div id="installedList" class="stack"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="page hidden" id="configure">
+        <div class="breadcrumb-row">
+          <button type="button" class="ghost" id="backToHarnessesBtn">← 返回 Harness 目标</button>
+          <span class="muted">OpenCode Adapter</span>
+        </div>
+        <div class="grid two wide-left">
+          <article class="card">
+            <h2>配置 OpenCode 使用 MiniMax Bridge MCP</h2>
+            <p class="muted">这个页面属于「Harness 目标 → OpenCode」。这里会保存默认 profile，并把 OpenCode 配置为直接启动 Harness 内置 MCP。API Key 不写入 opencode 配置文件。</p>
+            <form id="minimaxForm" class="form">
+              <label>
+                <span>MiniMax API Key <b>*</b></span>
+                <input name="MINIMAX_API_KEY" type="password" autocomplete="off" placeholder="sk-..." />
+              </label>
+              <label>
+                <span>MiniMax API Host</span>
+                <input name="MINIMAX_API_HOST" type="text" placeholder="https://api.minimaxi.com" />
+              </label>
+              <label>
+                <span>生成文件输出目录</span>
+                <input name="MINIMAX_MCP_BASE_PATH" type="text" />
+              </label>
+              <label>
+                <span>TTS 模式</span>
+                <select name="MINIMAX_T2A_MODE">
+                  <option value="async">Async HTTP</option>
+                  <option value="websocket">WebSocket</option>
+                </select>
+              </label>
+              <label class="check">
+                <input name="MINIMAX_ENABLE_TOKEN_PLAN_PROXY" type="checkbox" />
+                <span>启用 Token Plan MCP Proxy（web_search / understand_image）</span>
+              </label>
+              <label>
+                <span>Token Plan Key（可选）</span>
+                <input name="MINIMAX_PLAN_API_KEY" type="password" autocomplete="off" placeholder="留空则复用 MiniMax API Key" />
+              </label>
+              <label>
+                <span>Token Plan MCP 命令</span>
+                <input name="MINIMAX_PLAN_MCP_COMMAND" type="text" placeholder="uvx" />
+              </label>
+              <label>
+                <span>Token Plan MCP 参数</span>
+                <textarea name="MINIMAX_PLAN_MCP_ARGS" rows="3" placeholder='["minimax-coding-plan-mcp", "-y"]'></textarea>
+              </label>
+              <div class="actions">
+                <button type="button" id="saveProfileBtn" class="secondary">仅保存 Profile</button>
+                <button type="button" id="testStartupBtn" class="secondary">测试 MCP 启动</button>
+                <button type="button" id="testApiBtn" class="secondary">测试 MiniMax API</button>
+                <button type="submit" class="primary">保存并配置到 OpenCode</button>
+              </div>
+            </form>
+
+            <div class="probe-panel">
+              <h3>测试结果</h3>
+              <pre id="probeResult" class="code compact"></pre>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>OpenCode 预览</h2>
+            <p class="muted">MCP Harness 会合并写入 <code>mcp.minimax-bridge</code>，不会覆盖其他 MCP。修改前会自动备份。</p>
+            <pre id="opencodePreview" class="code"></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="page hidden" id="market">
+        <div class="market-toolbar">
+          <div>
+            <h2>MCP 市场</h2>
+            <p class="muted">v0.1 已预留市场结构。当前 MiniMax Bridge 是内置项；其他 MCP 先作为占位，后续可接入下载器、签名校验、健康检查和多 Harness 同步。</p>
+          </div>
+        </div>
+        <div id="marketGrid" class="market-grid"></div>
+      </section>
+
+      <section class="page hidden" id="harnesses">
+        <article class="card">
+          <h2>Harness 目标</h2>
+          <p class="muted">“Harness”在这里指可被 MCP Harness 自动配置的 Agent / 编程工具。第一版先打通 OpenCode，其他目标保留适配层入口。</p>
+          <div id="harnessList" class="harness-list"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js" type="module"></script>
+</body>
+</html>

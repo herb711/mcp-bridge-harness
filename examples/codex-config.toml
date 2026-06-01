@@ -1,0 +1,9 @@
+# Reserved example for a future Codex adapter.
+# v0.1 only writes OpenCode automatically.
+
+[mcp_servers.minimax_bridge]
+command = "node"
+args = ["/absolute/path/to/mcp-harness/dist/index.js", "mcp", "minimax-bridge", "--profile", "default"]
+
+[mcp_servers.minimax_bridge.env]
+MCP_HARNESS_HOME = "/absolute/path/to/McpHarness"

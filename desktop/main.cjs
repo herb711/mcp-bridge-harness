@@ -1,0 +1,130 @@
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+
+const appRoot = path.resolve(__dirname, '..');
+const webIndex = path.join(appRoot, 'web', 'index.html');
+const apiModulePath = path.join(appRoot, 'dist', 'harness', 'api.js');
+let apiModulePromise;
+
+function importApiModule() {
+  if (!apiModulePromise) {
+    apiModulePromise = import(pathToFileURL(apiModulePath).href);
+  }
+  return apiModulePromise;
+}
+
+async function ensureBuilt() {
+  if (!fs.existsSync(apiModulePath)) {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'MCP Harness 未构建',
+      message: '缺少 dist/harness/api.js。请先运行 npm run build。',
+    });
+    app.quit();
+    return false;
+  }
+  if (!fs.existsSync(webIndex)) {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'MCP Harness UI 缺失',
+      message: '缺少 web/index.html。请确认发布包包含 web 目录。',
+    });
+    app.quit();
+    return false;
+  }
+  return true;
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 980,
+    minHeight: 680,
+    title: 'MCP Harness',
+    backgroundColor: '#0b1020',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  win.loadFile(webIndex);
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  win.webContents.on('will-navigate', (event, url) => {
+    const local = pathToFileURL(webIndex).href;
+    if (url !== local && /^https?:\/\//i.test(url)) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  return win;
+}
+
+function createMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'MCP Harness',
+      submenu: [
+        { role: 'reload', label: '刷新' },
+        { role: 'toggleDevTools', label: '开发者工具' },
+        { type: 'separator' },
+        { role: isMac ? 'close' : 'quit', label: isMac ? '关闭窗口' : '退出' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+ipcMain.handle('harness:api', async (_event, request) => {
+  const api = await importApiModule();
+  const value = await api.handleHarnessApi(request || {});
+  if (value === undefined) throw new Error('Unknown API endpoint.');
+  return value;
+});
+
+ipcMain.handle('harness:openPath', async (_event, filePath) => {
+  if (!filePath || typeof filePath !== 'string') return { ok: false, error: 'Invalid path.' };
+  const result = await shell.openPath(filePath);
+  return result ? { ok: false, error: result } : { ok: true };
+});
+
+app.whenReady().then(async () => {
+  process.env.MCP_HARNESS_DESKTOP = '1';
+  if (!(await ensureBuilt())) return;
+  createMenu();
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

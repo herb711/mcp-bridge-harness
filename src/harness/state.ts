@@ -1,0 +1,227 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { BUILTIN_CATALOG, getCatalogEntry, type HarnessId } from "./catalog.js";
+import { appDataDir, catalogSnapshotPath, defaultOutputPath, logPath, secretsPath, statePath } from "./paths.js";
+import { readJsonCFile, writePrettyJson } from "./jsonc.js";
+
+export interface InstalledMcp {
+  id: string;
+  profileId: string;
+  displayName: string;
+  version: string;
+  source: "bundled" | "catalog" | "manual";
+  enabled: boolean;
+  installedAt: string;
+  updatedAt: string;
+  env: Record<string, string>;
+  secretKeys: string[];
+  targetHarnesses: HarnessId[];
+}
+
+export interface ClientBinding {
+  harnessId: HarnessId;
+  mcpId: string;
+  profileId: string;
+  enabled: boolean;
+  configPath?: string;
+  lastAppliedAt?: string;
+}
+
+export interface HarnessState {
+  schemaVersion: 1;
+  appName: "MCP Harness";
+  installed: Record<string, InstalledMcp>;
+  clients: Record<string, ClientBinding>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HarnessSecrets {
+  schemaVersion: 1;
+  profiles: Record<string, Record<string, string>>;
+  updatedAt: string;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function defaultState(): HarnessState {
+  const now = nowIso();
+  return {
+    schemaVersion: 1,
+    appName: "MCP Harness",
+    installed: {},
+    clients: {},
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function defaultSecrets(): HarnessSecrets {
+  return {
+    schemaVersion: 1,
+    profiles: {},
+    updatedAt: nowIso(),
+  };
+}
+
+export async function ensureHarnessDirs(): Promise<void> {
+  await fs.mkdir(appDataDir(), { recursive: true });
+  await fs.mkdir(path.dirname(logPath()), { recursive: true });
+  await fs.mkdir(defaultOutputPath(), { recursive: true });
+}
+
+export async function readState(): Promise<HarnessState> {
+  await ensureHarnessDirs();
+  return readJsonCFile<HarnessState>(statePath(), defaultState());
+}
+
+export async function writeState(state: HarnessState): Promise<void> {
+  state.updatedAt = nowIso();
+  await ensureHarnessDirs();
+  await writePrettyJson(statePath(), state);
+}
+
+export async function readSecrets(): Promise<HarnessSecrets> {
+  await ensureHarnessDirs();
+  return readJsonCFile<HarnessSecrets>(secretsPath(), defaultSecrets());
+}
+
+export async function writeSecrets(secrets: HarnessSecrets): Promise<void> {
+  secrets.updatedAt = nowIso();
+  await ensureHarnessDirs();
+  await writePrettyJson(secretsPath(), secrets);
+  try {
+    await fs.chmod(secretsPath(), 0o600);
+  } catch {
+    // Windows and some mounted filesystems may ignore POSIX file modes.
+  }
+}
+
+export async function appendLog(message: string): Promise<void> {
+  await ensureHarnessDirs();
+  await fs.appendFile(logPath(), `[${nowIso()}] ${message}\n`, "utf8");
+}
+
+export async function ensureDefaultInstall(): Promise<HarnessState> {
+  await ensureHarnessDirs();
+  const state = await readState();
+  const secrets = await readSecrets();
+  let changed = false;
+
+  const minimax = getCatalogEntry("minimax-bridge");
+  if (!minimax) throw new Error("Bundled catalog is missing minimax-bridge.");
+
+  if (!state.installed["minimax-bridge"]) {
+    const now = nowIso();
+    state.installed["minimax-bridge"] = {
+      id: "minimax-bridge",
+      profileId: "default",
+      displayName: minimax.displayName,
+      version: minimax.version,
+      source: "bundled",
+      enabled: true,
+      installedAt: now,
+      updatedAt: now,
+      env: {
+        MINIMAX_API_HOST: "https://api.minimaxi.com",
+        MINIMAX_MCP_BASE_PATH: defaultOutputPath(),
+        MINIMAX_T2A_MODE: "async",
+        MINIMAX_ENABLE_TOKEN_PLAN_PROXY: "true",
+        MINIMAX_PLAN_MCP_COMMAND: "uvx",
+        MINIMAX_PLAN_MCP_ARGS: "[\"minimax-coding-plan-mcp\", \"-y\"]",
+      },
+      secretKeys: ["MINIMAX_API_KEY", "MINIMAX_PLAN_API_KEY"],
+      targetHarnesses: ["opencode"],
+    };
+    changed = true;
+  }
+
+  const profileKey = profileKeyFor("minimax-bridge", "default");
+  if (!secrets.profiles[profileKey]) {
+    secrets.profiles[profileKey] = {};
+    await writeSecrets(secrets);
+  }
+
+  if (changed) await writeState(state);
+  await writePrettyJson(catalogSnapshotPath(), BUILTIN_CATALOG);
+  return state;
+}
+
+export function profileKeyFor(mcpId: string, profileId: string): string {
+  return `${mcpId}:${profileId}`;
+}
+
+export async function getEffectiveEnv(mcpId: string, profileId = "default"): Promise<Record<string, string>> {
+  const state = await readState();
+  const secrets = await readSecrets();
+  const installed = state.installed[mcpId];
+  if (!installed) throw new Error(`MCP is not installed: ${mcpId}`);
+  const profileKey = profileKeyFor(mcpId, profileId);
+  return {
+    ...installed.env,
+    ...(secrets.profiles[profileKey] || {}),
+  };
+}
+
+export async function applyProfileToProcessEnv(mcpId: string, profileId = "default"): Promise<Record<string, string>> {
+  await ensureDefaultInstall();
+  const env = await getEffectiveEnv(mcpId, profileId);
+  for (const [key, value] of Object.entries(env)) {
+    if (value != null && value !== "") process.env[key] = value;
+  }
+  process.env.MCP_HARNESS_HOME = appDataDir();
+  return env;
+}
+
+export async function updateMcpProfile(options: {
+  mcpId: string;
+  profileId?: string;
+  env?: Record<string, string | undefined>;
+  secrets?: Record<string, string | undefined>;
+}): Promise<InstalledMcp> {
+  await ensureDefaultInstall();
+  const state = await readState();
+  const secrets = await readSecrets();
+  const profileId = options.profileId || "default";
+  const installed = state.installed[options.mcpId];
+  if (!installed) throw new Error(`MCP is not installed: ${options.mcpId}`);
+
+  for (const [key, value] of Object.entries(options.env || {})) {
+    if (value == null) continue;
+    installed.env[key] = String(value);
+  }
+
+  const profileKey = profileKeyFor(options.mcpId, profileId);
+  secrets.profiles[profileKey] ||= {};
+  for (const [key, value] of Object.entries(options.secrets || {})) {
+    if (value == null) continue;
+    const stringValue = String(value);
+    if (stringValue === "") continue;
+    secrets.profiles[profileKey][key] = stringValue;
+  }
+
+  installed.updatedAt = nowIso();
+  state.installed[options.mcpId] = installed;
+  await writeState(state);
+  await writeSecrets(secrets);
+  await appendLog(`Updated profile ${profileKey}`);
+  return installed;
+}
+
+export async function markClientBinding(binding: ClientBinding): Promise<void> {
+  const state = await readState();
+  const key = `${binding.harnessId}:${binding.mcpId}:${binding.profileId}`;
+  state.clients[key] = binding;
+  await writeState(state);
+}
+
+export function maskEnv(env: Record<string, string>, secretKeys: string[]): Record<string, string> {
+  const secretSet = new Set(secretKeys);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    out[key] = secretSet.has(key) && value ? "••••••••" : value;
+  }
+  return out;
+}

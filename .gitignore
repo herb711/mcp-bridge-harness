@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+out/
+coverage/
+*.tsbuildinfo
+
+# Release artifacts
+release/
+outputs/
+
+# Local config and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+minimax-mcp-opencode.json
+minimax-mcp-codex.toml
+*apikey*
+*api-key*
+*api_key*
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Tool caches
+.cache/
+.parcel-cache/
+.vite/
+.turbo/
+.esbuild/
+.nyc_output/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local launchers
+MCP Harness.cmd
