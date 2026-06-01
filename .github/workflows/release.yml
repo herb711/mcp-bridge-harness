@@ -1,0 +1,146 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the release (e.g. 0.1.0)'
+        required: true
+      prerelease:
+        description: 'Mark as prerelease'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: win-x64
+            os: windows-latest
+            platform: win-x64
+          - label: linux-x64
+            os: ubuntu-latest
+            platform: linux-x64
+          - label: macos-arm64
+            os: macos-latest
+            platform: macos-arm64
+          - label: macos-x64
+            os: macos-13
+            platform: macos-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=${{ inputs.version }}
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is required (use a v* tag or workflow_dispatch input)."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build SEA executable
+        run: node scripts/make-release.mjs --platform=${{ matrix.platform }}
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-harness-${{ steps.version.outputs.version }}-${{ matrix.label }}
+          path: |
+            release/mcp-harness-${{ steps.version.outputs.version }}-${{ matrix.label }}
+            release/mcp-harness-${{ steps.version.outputs.version }}-${{ matrix.label }}.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            PRERELEASE=false
+          else
+            VERSION=${{ inputs.version }}
+            PRERELEASE=${{ inputs.prerelease }}
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is required."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256SUMS
+        working-directory: artifacts
+        run: |
+          : > SHA256SUMS
+          for f in *; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> SHA256SUMS
+            fi
+          done
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
+
+      - name: Generate latest.json update manifest
+        working-directory: ${{ github.workspace }}
+        run: |
+          node scripts/write-update-manifest.mjs \
+            --version=${{ steps.version.outputs.version }} \
+            --repo=${{ github.repository }} \
+            --tag=v${{ steps.version.outputs.version }} \
+            --input=artifacts \
+            --output=artifacts/latest.json
+          echo "--- latest.json ---"
+          cat artifacts/latest.json
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            artifacts/*
+            agent.manifest.json
