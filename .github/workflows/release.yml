@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version for the release (e.g. 0.2.0)'
+        description: 'Version for the release (e.g. 0.2.2)'
         required: true
       prerelease:
         description: 'Mark as prerelease'
@@ -41,9 +41,6 @@ jobs:
             target: linux
             arch: x64
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,18 +54,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Electron desktop app
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            npx --no-install electron-builder --win --x64 --publish never
-          elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            npx --no-install electron-builder --linux --x64 --publish never
-          else
-            npx --no-install electron-builder --mac --${{ matrix.arch }} --publish never
-          fi
+      - name: Build Electron desktop app (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npx --no-install electron-builder --win --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ''
+
+      - name: Build Electron desktop app (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: npx --no-install electron-builder --mac --${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Build Electron desktop app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npx --no-install electron-builder --linux --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
