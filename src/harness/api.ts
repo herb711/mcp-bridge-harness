@@ -4,6 +4,7 @@ import { applyOpenCodeConfig, previewOpenCodeConfig } from "./opencode.js";
 import { probeBundledMcp, type ProbeMode } from "./probe.js";
 import { ensureDefaultInstall, getEffectiveEnv, getMcpProfileStatus, maskEnv, readState, updateMcpProfile } from "./state.js";
 import { ensureMcpShim, isElectronPackaged, mcpShimPath, packagedRuntime } from "./shim.js";
+import { appPackageInfo, checkForUpdate } from "./update.js";
 
 export interface HarnessApiRequest {
   path: string;
@@ -36,7 +37,7 @@ function stringRecord(value: unknown): Record<string, string> {
 }
 
 export function supportedHarnesses(clients: Record<string, { enabled?: boolean }> = {}): HarnessTargetSummary[] {
-  const opencodeConfigured = Boolean(clients["opencode:minimax-bridge:default"]?.enabled);
+  const opencodeConfigured = Object.entries(clients).some(([key, value]) => key.startsWith("opencode:") && value?.enabled);
   return [
     {
       id: "opencode",
@@ -83,6 +84,7 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
 
   if (method === "GET" && url.pathname === "/api/status") {
     const state = await readState();
+    const packageInfo = await appPackageInfo();
     const profileStatuses = await Promise.all(
       Object.values(state.installed).map((item) => getMcpProfileStatus(item.id, item.profileId)),
     );
@@ -97,7 +99,9 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
     }
     return {
       app: "MCP Harness",
-      version: "0.2.0",
+      version: packageInfo.version,
+      repository: packageInfo.repo,
+      releasePageUrl: packageInfo.releasePageUrl,
       mode: "desktop",
       packaged: isElectronPackaged(),
       installDir: runtime?.installDir || null,
@@ -112,6 +116,10 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
       availableMcpCount: Object.keys(state.installed).length,
       supportedHarnesses: supportedHarnesses(state.clients),
     };
+  }
+
+  if (method === "GET" && url.pathname === "/api/update/check") {
+    return checkForUpdate({ force: url.searchParams.get("force") === "1" });
   }
 
   if (method === "GET" && url.pathname === "/api/catalog") {
@@ -165,8 +173,10 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
 
   if (method === "POST" && url.pathname === "/api/mcp/test") {
     const body = asRecord(request.body);
+    const mcpId = typeof body.mcpId === "string" ? body.mcpId : "minimax-bridge";
+    const profileId = typeof body.profileId === "string" ? body.profileId : "default";
     const mode: ProbeMode = body.mode === "api" ? "api" : "startup";
-    return probeBundledMcp(mode);
+    return probeBundledMcp(mode, mcpId, profileId);
   }
 
   if (method === "POST" && url.pathname === "/api/harness/opencode/apply") {

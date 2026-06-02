@@ -14,8 +14,29 @@ export class MiniMaxApiError extends Error {
   }
 }
 
+export class AgnesApiError extends Error {
+  readonly code = "AGNES_API_ERROR";
+  readonly status?: number;
+  readonly responseBody?: unknown;
+
+  constructor(message: string, options: { status?: number; responseBody?: unknown } = {}) {
+    super(message);
+    this.status = options.status;
+    this.responseBody = options.responseBody;
+  }
+}
+
 export function errorToJson(error: unknown) {
   if (error instanceof MiniMaxApiError) {
+    return {
+      ok: false,
+      code: error.code,
+      message: error.message,
+      status: error.status,
+      responseBody: error.responseBody,
+    };
+  }
+  if (error instanceof AgnesApiError) {
     return {
       ok: false,
       code: error.code,

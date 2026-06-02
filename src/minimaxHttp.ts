@@ -55,6 +55,26 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+function isMiniMaxSuccessStatus(status: unknown): boolean {
+  if (typeof status === "number") return status === 0;
+  if (typeof status !== "string") return false;
+  return ["0", "ok", "success", "succeeded"].includes(status.trim().toLowerCase());
+}
+
+function miniMaxBusinessError(value: unknown): { statusCode: unknown; statusMessage?: string } | undefined {
+  const root = asRecord(value);
+  const baseResp = asRecord(root.base_resp);
+  if (!Object.keys(baseResp).length) return undefined;
+
+  const statusCode = baseResp.status_code;
+  if (statusCode == null || isMiniMaxSuccessStatus(statusCode)) return undefined;
+
+  return {
+    statusCode,
+    statusMessage: firstString(baseResp.status_msg, baseResp.message, baseResp.msg),
+  };
+}
+
 function collectUrlValues(value: unknown, out: string[] = []): string[] {
   if (typeof value === "string" && /^https?:\/\//i.test(value)) {
     out.push(value);
@@ -129,6 +149,13 @@ export class MiniMaxHttpClient {
     if (!response.ok) {
       throw new MiniMaxApiError(`MiniMax API request failed: ${response.status} ${response.statusText}`, {
         status: response.status,
+        responseBody: parsed,
+      });
+    }
+    const businessError = miniMaxBusinessError(parsed);
+    if (businessError) {
+      const detail = businessError.statusMessage ? `: ${businessError.statusMessage}` : "";
+      throw new MiniMaxApiError(`MiniMax API business error (${String(businessError.statusCode)})${detail}`, {
         responseBody: parsed,
       });
     }
@@ -533,6 +560,10 @@ export class MiniMaxHttpClient {
     for (const [index, url] of urls.entries()) {
       if (typeof url !== "string") continue;
       artifacts.push(await this.downloadUrlAsArtifact(url, { subdir: "images", outputDirectory: input.output_directory, prefix: `text_to_image_url_${index + 1}`, auth: false }));
+    }
+
+    if (artifacts.length === 0) {
+      throw new MiniMaxApiError("MiniMax image_generation returned no image artifacts", { responseBody: raw });
     }
 
     const imageItems = artifacts

@@ -1,4 +1,5 @@
 import { TOOLS } from "../toolSchemas.js";
+import { AGNES_TOOLS } from "../agnesToolSchemas.js";
 
 export type HarnessId = "opencode" | "codex" | "claude-code" | "cursor" | "vscode";
 export type CatalogStatus = "bundled" | "available" | "coming_soon";
@@ -34,6 +35,7 @@ export interface CatalogEntry {
 }
 
 const minimaxTools = TOOLS.map((tool) => tool.name);
+const agnesTools = AGNES_TOOLS.map((tool) => tool.name);
 
 export const BUILTIN_CATALOG: CatalogEntry[] = [
   {
@@ -133,6 +135,56 @@ export const BUILTIN_CATALOG: CatalogEntry[] = [
         label: "Token Plan MCP 参数",
         type: "textarea",
         default: "[\"minimax-coding-plan-mcp\", \"-y\"]",
+      },
+    ],
+  },
+  {
+    id: "agnes",
+    name: "agnes-mcp",
+    displayName: "Agnes",
+    version: "0.1.0-harness.1",
+    description: "Bundled Agnes AI MCP. Exposes Agnes Image 2.1 Flash and agnes-video-v2.0 generation through the Agnes API hub.",
+    category: "Multimodal",
+    tags: ["bundled", "agnes", "image", "video"],
+    status: "bundled",
+    transport: "stdio",
+    installMode: "bundled",
+    supportedHarnesses: ["opencode"],
+    tools: agnesTools,
+    permissions: ["network:agnes", "file:write:artifacts", "secret:read:agnes-api-key"],
+    fields: [
+      {
+        key: "AGNES_API_KEY",
+        label: "Agnes API Key",
+        type: "password",
+        required: true,
+        secret: true,
+        placeholder: "ag-...",
+        help: "用于 Agnes Image 2.1 Flash 和 agnes-video-v2.0。保存到本机 Harness secrets 文件，不写入 OpenCode 配置。",
+      },
+      {
+        key: "AGNES_API_HOST",
+        label: "Agnes API Host",
+        type: "text",
+        default: "https://apihub.agnes-ai.com",
+      },
+      {
+        key: "AGNES_MCP_BASE_PATH",
+        label: "生成文件输出目录",
+        type: "text",
+        help: "Agnes 生成的图片、视频文件默认保存到这里。",
+      },
+      {
+        key: "AGNES_POLL_INTERVAL_SECONDS",
+        label: "轮询间隔秒数",
+        type: "text",
+        default: "10",
+      },
+      {
+        key: "AGNES_MAX_WAIT_SECONDS",
+        label: "最大等待秒数",
+        type: "text",
+        default: "900",
       },
     ],
   },

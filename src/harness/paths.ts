@@ -37,8 +37,8 @@ export function logPath(): string {
   return path.join(appDataDir(), "logs", "harness.log");
 }
 
-export function defaultOutputPath(): string {
-  return path.join(appDataDir(), "outputs", "minimax");
+export function defaultOutputPath(provider = "minimax"): string {
+  return path.join(appDataDir(), "outputs", provider);
 }
 
 export function defaultOpenCodeConfigPath(): string {

@@ -118,6 +118,8 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
 
   const minimax = getCatalogEntry("minimax-bridge");
   if (!minimax) throw new Error("Bundled catalog is missing minimax-bridge.");
+  const agnes = getCatalogEntry("agnes");
+  if (!agnes) throw new Error("Bundled catalog is missing agnes.");
 
   if (!state.installed["minimax-bridge"]) {
     const now = nowIso();
@@ -164,9 +166,53 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
     }
   }
 
+  if (!state.installed["agnes"]) {
+    const now = nowIso();
+    state.installed["agnes"] = {
+      id: "agnes",
+      profileId: "default",
+      displayName: agnes.displayName,
+      version: agnes.version,
+      source: "bundled",
+      enabled: true,
+      installedAt: now,
+      updatedAt: now,
+      env: {
+        AGNES_API_HOST: "https://apihub.agnes-ai.com",
+        AGNES_MCP_BASE_PATH: defaultOutputPath("agnes"),
+        AGNES_POLL_INTERVAL_SECONDS: "10",
+        AGNES_MAX_WAIT_SECONDS: "900",
+      },
+      secretKeys: ["AGNES_API_KEY"],
+      targetHarnesses: ["opencode"],
+    };
+    changed = true;
+  }
+
+  const installedAgnes = state.installed["agnes"];
+  if (installedAgnes) {
+    const envDefaults: Record<string, string> = {
+      AGNES_API_HOST: "https://apihub.agnes-ai.com",
+      AGNES_MCP_BASE_PATH: defaultOutputPath("agnes"),
+      AGNES_POLL_INTERVAL_SECONDS: "10",
+      AGNES_MAX_WAIT_SECONDS: "900",
+    };
+    for (const [key, value] of Object.entries(envDefaults)) {
+      if (installedAgnes.env[key] == null || installedAgnes.env[key] === "") {
+        installedAgnes.env[key] = value;
+        changed = true;
+      }
+    }
+  }
+
   const profileKey = profileKeyFor("minimax-bridge", "default");
   if (!secrets.profiles[profileKey]) {
     secrets.profiles[profileKey] = {};
+    await writeSecrets(secrets);
+  }
+  const agnesProfileKey = profileKeyFor("agnes", "default");
+  if (!secrets.profiles[agnesProfileKey]) {
+    secrets.profiles[agnesProfileKey] = {};
     await writeSecrets(secrets);
   }
 

@@ -43,7 +43,7 @@ if (!fs.existsSync(sumsFile)) {
 const sumsContent = fs.readFileSync(sumsFile, 'utf8');
 const checksums = Object.create(null);
 for (const line of sumsContent.split(/\r?\n/)) {
-  const match = line.match(/^([a-f0-9]{64})\s+(.+)$/);
+  const match = line.replace(/^\uFEFF/, '').match(/^([a-f0-9]{64})\s+(.+)$/);
   if (match) checksums[match[2]] = match[1];
 }
 
@@ -79,12 +79,18 @@ const platformByOs = {
 function platformKeyFor(file) {
   const m = file.match(/^mcp-harness-\d+\.\d+\.\d+-(.+?)(\.[a-z0-9.]+)?$/i);
   if (!m) return null;
+  const lower = file.toLowerCase();
   const tokens = m[1].split('-');
   let osName = null;
   let arch = null;
   for (const token of tokens) {
     if (platformByOs[token.toLowerCase()]) osName = platformByOs[token.toLowerCase()];
     else if (archFromToken[token.toLowerCase()]) arch = archFromToken[token.toLowerCase()];
+  }
+  if (!osName) {
+    if (lower.endsWith('.exe')) osName = 'windows';
+    else if (lower.endsWith('.dmg') || lower.endsWith('.zip')) osName = 'macos';
+    else if (lower.endsWith('.appimage')) osName = 'linux';
   }
   if (!osName && tokens.length === 1 && archFromToken[tokens[0].toLowerCase()]) {
     return null;
@@ -103,7 +109,8 @@ const entries = fs.readdirSync(inputDir, { withFileTypes: true });
 for (const entry of entries) {
   if (!entry.isFile()) continue;
   const file = entry.name;
-  if (file === 'SHA256SUMS' || file === 'latest.json' || file.endsWith('.json')) continue;
+  const lowerFile = file.toLowerCase();
+  if (file === 'SHA256SUMS' || lowerFile === 'latest.json' || lowerFile.endsWith('.json') || lowerFile.endsWith('.blockmap') || lowerFile.endsWith('.yml')) continue;
   const platformKey = platformKeyFor(file);
   if (!platformKey) continue;
   const alias = aliasFor(platformKey);

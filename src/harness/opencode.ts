@@ -20,8 +20,16 @@ export interface OpenCodeConfig {
   [key: string]: unknown;
 }
 
-const MINIMAX_INSTRUCTION_FILE = "mcp-harness-minimax.instructions.md";
-const MINIMAX_MCP_TIMEOUT_MS = 120000;
+const MCP_TIMEOUT_MS: Record<string, number> = {
+  "minimax-bridge": 120000,
+  agnes: 600000,
+};
+
+const INSTRUCTION_FILES: Record<string, string> = {
+  "minimax-bridge": "mcp-harness-minimax.instructions.md",
+  agnes: "mcp-harness-agnes.instructions.md",
+};
+
 const MINIMAX_INSTRUCTION_TEXT = `# MCP Harness MiniMax Routing
 
 Use the MiniMax Bridge MCP proactively. The user should not need to explicitly name MCP tools.
@@ -33,16 +41,36 @@ Use the MiniMax Bridge MCP proactively. The user should not need to explicitly n
 - For speech, image, video, music, lyrics, voice clone, or query tasks, use the relevant minimax-bridge tool when the request is explicit enough.
 `;
 
+const AGNES_INSTRUCTION_TEXT = `# MCP Harness Agnes Routing
+
+Use the Agnes MCP proactively for Agnes image and video generation. The user should not need to explicitly name MCP tools.
+
+- For image generation or image-to-image editing, call agnes_image_21_flash.
+- For text-to-video, image-to-video, multi-image video, or keyframe animation, call agnes_video_v20.
+- For agnes_video_v20, use model agnes-video-v2.0 unless the user explicitly asks for another model.
+- For multi-image video, pass image URLs in images. For keyframe animation, pass images and mode: "keyframes".
+- For an existing video task ID, call agnes_query_video_v20.
+- If the user provides a local image file, ask for a URL that Agnes can fetch unless the file has already been uploaded somewhere accessible.
+`;
+
 function backupStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function instructionPathForConfig(configPath: string): string {
-  return path.join(path.dirname(configPath), MINIMAX_INSTRUCTION_FILE);
+function instructionFileForMcp(mcpId: string): string {
+  return INSTRUCTION_FILES[mcpId] || `mcp-harness-${mcpId}.instructions.md`;
 }
 
-function instructionRefForConfig(configPath: string): string {
-  return instructionPathForConfig(configPath).replace(/\\/g, "/");
+function instructionTextForMcp(mcpId: string): string {
+  return mcpId === "agnes" ? AGNES_INSTRUCTION_TEXT : MINIMAX_INSTRUCTION_TEXT;
+}
+
+function instructionPathForConfig(configPath: string, mcpId: string): string {
+  return path.join(path.dirname(configPath), instructionFileForMcp(mcpId));
+}
+
+function instructionRefForConfig(configPath: string, mcpId: string): string {
+  return instructionPathForConfig(configPath, mcpId).replace(/\\/g, "/");
 }
 
 function refsEqual(a: unknown, b: string): boolean {
@@ -57,9 +85,9 @@ function mergeInstruction(existing: OpenCodeConfig, instructionRef: string): voi
   existing.instructions = instructions;
 }
 
-async function writeInstructionFile(configPath: string): Promise<string> {
-  const instructionPath = instructionPathForConfig(configPath);
-  await fs.writeFile(instructionPath, MINIMAX_INSTRUCTION_TEXT, "utf8");
+async function writeInstructionFile(configPath: string, mcpId: string): Promise<string> {
+  const instructionPath = instructionPathForConfig(configPath, mcpId);
+  await fs.writeFile(instructionPath, instructionTextForMcp(mcpId), "utf8");
   return instructionPath;
 }
 
@@ -68,7 +96,7 @@ export function buildOpenCodeMcpEntry(mcpId: string, profileId = "default", enab
     type: "local",
     command: commandForBundledMcp(mcpId, profileId),
     enabled,
-    timeout: MINIMAX_MCP_TIMEOUT_MS,
+    timeout: MCP_TIMEOUT_MS[mcpId] || 120000,
     environment: {
       MCP_HARNESS_HOME: appDataDir(),
     },
@@ -85,8 +113,8 @@ export async function previewOpenCodeConfig(options: {
   return {
     configPath,
     entry: buildOpenCodeMcpEntry(options.mcpId, options.profileId || "default", options.enabled ?? true),
-    instructionPath: instructionPathForConfig(configPath),
-    instructionRef: instructionRefForConfig(configPath),
+    instructionPath: instructionPathForConfig(configPath, options.mcpId),
+    instructionRef: instructionRefForConfig(configPath, options.mcpId),
   };
 }
 
@@ -115,10 +143,10 @@ export async function applyOpenCodeConfig(options: {
 
   const profileId = options.profileId || "default";
   const entry = buildOpenCodeMcpEntry(options.mcpId, profileId, options.enabled ?? true);
-  const instructionRef = instructionRefForConfig(configPath);
+  const instructionRef = instructionRefForConfig(configPath, options.mcpId);
   existing.mcp[options.mcpId] = entry;
   mergeInstruction(existing, instructionRef);
-  const instructionPath = await writeInstructionFile(configPath);
+  const instructionPath = await writeInstructionFile(configPath, options.mcpId);
   await writePrettyJson(configPath, existing);
 
   await markClientBinding({

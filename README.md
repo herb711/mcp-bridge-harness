@@ -59,6 +59,10 @@ mcp-harness-0.2.0-x64-portable.exe  # 免安装绿色版，双击即可运行
 3. 安装完成，桌面会出现 **MCP Harness** 图标。
 4. 双击图标即可启动本地 MCP 管家桌面程序。
 
+### MCP 安装教程
+
+如需视频教程，可参考：[MCP 安装教程（Bilibili）](https://www.bilibili.com/video/BV1dj5F6aEJa/?vd_source=a58871624315dd079f4e4f7f33690416)
+
 ### Windows（开发）
 
 双击：

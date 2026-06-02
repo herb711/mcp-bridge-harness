@@ -11,6 +11,9 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ArtifactStore } from "./artifacts.js";
+import { loadAgnesConfig } from "./agnesConfig.js";
+import { AgnesHttpClient } from "./agnesHttp.js";
+import { AGNES_TOOLS } from "./agnesToolSchemas.js";
 import { loadConfig } from "./config.js";
 import { errorToJson } from "./errors.js";
 import { MiniMaxHttpClient } from "./minimaxHttp.js";
@@ -21,6 +24,8 @@ import { TOOLS } from "./toolSchemas.js";
 import { getAgentManifest } from "./manifest.js";
 import { applyProfileToProcessEnv } from "./harness/state.js";
 import { installHarness, startHarnessServer } from "./harness/server.js";
+
+const BUNDLED_MCP_IDS = new Set(["minimax-bridge", "agnes"]);
 
 function argValue(argv: string[], name: string, fallback?: string): string | undefined {
   const eqPrefix = `${name}=`;
@@ -59,6 +64,9 @@ Usage:
   mcp-harness mcp minimax-bridge [--profile default]
       Run the bundled MiniMax Bridge MCP over stdio. This is what OpenCode starts.
 
+  mcp-harness mcp agnes [--profile default]
+      Run the bundled Agnes MCP over stdio.
+
   mcp-harness --manifest
       Print Redou/Harness style MCP manifest.
 
@@ -68,6 +76,10 @@ Usage:
 Backward compatibility:
   Running without a Harness command starts the MiniMax Bridge MCP stdio server.
 `);
+}
+
+function toolsForMcp(mcpId: string) {
+  return mcpId === "agnes" ? AGNES_TOOLS : TOOLS;
 }
 
 async function launchDesktopApp(): Promise<void> {
@@ -100,7 +112,12 @@ async function launchDesktopApp(): Promise<void> {
   });
 }
 
-async function runMcpServer(): Promise<void> {
+async function runMcpServer(mcpId = "minimax-bridge"): Promise<void> {
+  if (mcpId === "agnes") {
+    await runAgnesMcpServer();
+    return;
+  }
+
   const config = loadConfig();
   const store = new ArtifactStore(config.basePath);
   const minimax = new MiniMaxHttpClient(config, store);
@@ -195,6 +212,45 @@ async function runMcpServer(): Promise<void> {
   await server.connect(transport);
 }
 
+async function runAgnesMcpServer(): Promise<void> {
+  const config = loadAgnesConfig();
+  const store = new ArtifactStore(config.basePath);
+  const agnes = new AgnesHttpClient(config, store);
+
+  const server = new Server(
+    { name: "agnes-mcp", version: "0.1.0-harness.1" },
+    { capabilities: { tools: {} } },
+  );
+
+  async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+    switch (name) {
+      case "image_21_flash":
+        return agnes.image21Flash(args);
+      case "video_v20":
+        return agnes.videoV20(args);
+      case "query_video_v20":
+        return agnes.queryVideoV20(args);
+      default:
+        throw new Error(`Unknown Agnes tool: ${name}`);
+    }
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: AGNES_TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      const result = await dispatchTool(request.params.name, request.params.arguments ?? {});
+      return isCallToolResult(result) ? result : toCallToolResult(request.params.name, result);
+    } catch (error) {
+      return toCallToolResult(request.params.name, errorToJson(error), true);
+    }
+  });
+
+  await store.ensureBasePath();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const command = argv[0];
@@ -205,7 +261,8 @@ async function main(): Promise<void> {
   }
 
   if (argv.includes("--tools")) {
-    console.log(JSON.stringify({ tools: TOOLS }, null, 2));
+    const mcpId = argValue(argv, "--mcp", "minimax-bridge") || "minimax-bridge";
+    console.log(JSON.stringify({ tools: toolsForMcp(mcpId) }, null, 2));
     return;
   }
 
@@ -239,14 +296,14 @@ async function main(): Promise<void> {
   if (command === "mcp") {
     const mcpId = argv[1] || "minimax-bridge";
     const profileId = argValue(argv, "--profile", "default") || "default";
-    if (mcpId !== "minimax-bridge") throw new Error(`Unknown bundled MCP: ${mcpId}`);
+    if (!BUNDLED_MCP_IDS.has(mcpId)) throw new Error(`Unknown bundled MCP: ${mcpId}`);
     await applyProfileToProcessEnv(mcpId, profileId);
-    await runMcpServer();
+    await runMcpServer(mcpId);
     return;
   }
 
   // Backward compatibility: existing OpenCode/Codex configs that run node dist/index.js still get the stdio MCP.
-  await runMcpServer();
+  await runMcpServer("minimax-bridge");
 }
 
 main().catch((error) => {

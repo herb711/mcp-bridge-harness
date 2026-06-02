@@ -7,9 +7,11 @@ export type ProbeMode = "startup" | "api";
 export interface ProbeResult {
   ok: boolean;
   mode: ProbeMode;
+  mcpId: string;
   command: string[];
   tools: string[];
   voiceProbe?: unknown;
+  imageProbe?: unknown;
   apiProbe?: unknown;
 }
 
@@ -69,8 +71,8 @@ async function closeQuietly(client: Client | undefined, transport: StdioClientTr
   await transport?.close().catch(() => undefined);
 }
 
-export async function probeBundledMcp(mode: ProbeMode): Promise<ProbeResult> {
-  const entry = buildOpenCodeMcpEntry("minimax-bridge", "default", true);
+export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge", profileId = "default"): Promise<ProbeResult> {
+  const entry = buildOpenCodeMcpEntry(mcpId, profileId, true);
   const [command, ...args] = entry.command;
   let client: Client | undefined;
   let transport: StdioClientTransport | undefined;
@@ -90,33 +92,48 @@ export async function probeBundledMcp(mode: ProbeMode): Promise<ProbeResult> {
     await client.connect(transport);
     const listed = await client.listTools(undefined, { timeout: 15000 });
     const tools = listed.tools.map((tool) => tool.name).sort();
-    if (!tools.includes("list_voices")) {
-      throw new Error("MCP started, but list_voices was not registered.");
+    const expectedTool = mcpId === "agnes" ? "image_21_flash" : "list_voices";
+    if (!tools.includes(expectedTool)) {
+      throw new Error(`MCP started, but ${expectedTool} was not registered.`);
     }
 
-    const voiceProbe = parseTextContent(await client.callTool({
-      name: "list_voices",
-      arguments: { voice_type: "system", query: "female-shaonv", limit: 1 },
-    }, undefined, { timeout: 15000 }));
-
     const result: ProbeResult = {
-      ok: !probeFailed(voiceProbe),
+      ok: true,
       mode,
+      mcpId,
       command: entry.command,
       tools,
-      voiceProbe,
     };
 
+    if (mcpId === "agnes") {
+      result.imageProbe = { ok: true, tool: "image_21_flash", note: "Tool schema is registered." };
+    } else {
+      const voiceProbe = parseTextContent(await client.callTool({
+        name: "list_voices",
+        arguments: { voice_type: "system", query: "female-shaonv", limit: 1 },
+      }, undefined, { timeout: 15000 }));
+      result.voiceProbe = voiceProbe;
+      result.ok = !probeFailed(voiceProbe);
+    }
+
     if (mode === "api") {
-      const apiProbe = parseTextContent(await client.callTool({
-        name: "text_to_audio",
-        arguments: {
-          text: "MiniMax MCP test.",
-          voice_id: "female-shaonv",
-          async_mode: true,
-          transport: "async",
-        },
-      }, undefined, { timeout: 30000 }));
+      const apiProbe = mcpId === "agnes"
+        ? parseTextContent(await client.callTool({
+          name: "image_21_flash",
+          arguments: {
+            prompt: "A small blue square icon on a clean white background.",
+            size: "512x512",
+          },
+        }, undefined, { timeout: 120000 }))
+        : parseTextContent(await client.callTool({
+          name: "text_to_audio",
+          arguments: {
+            text: "MiniMax MCP test.",
+            voice_id: "female-shaonv",
+            async_mode: true,
+            transport: "async",
+          },
+        }, undefined, { timeout: 30000 }));
       result.apiProbe = apiProbe;
       if (probeFailed(apiProbe)) result.ok = false;
     }

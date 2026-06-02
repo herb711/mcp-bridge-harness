@@ -6,12 +6,15 @@ const state = {
   catalog: [],
   installed: [],
   clients: {},
+  selectedMcpId: "minimax-bridge",
+  update: null,
+  updateChecking: false,
 };
 
 const titles = {
   dashboard: ["总览", "查看本地 Harness 状态和 MCP 配置。"],
-  configure: ["配置 OpenCode", "从 Harness 目标进入，配置 OpenCode 直接使用 MCP。"],
-  market: ["MCP 市场", "预留 MCP 下载、安装、健康检查和多 Harness 分发入口。"],
+  configure: ["配置 OpenCode", "选择要同步到 OpenCode 的 MCP，并保存本地 profile。"],
+  market: ["MCP 市场", "发现、安装和配置可同步到 Harness 的 MCP。"],
   harnesses: ["Harness 目标", "管理 MCP 要同步到哪些编程工具。"],
 };
 
@@ -63,10 +66,39 @@ function switchPage(page) {
   hideAlert();
 }
 
+function selectedInstalled() {
+  return state.installed.find((item) => item.id === state.selectedMcpId);
+}
+
+function selectedCatalogEntry() {
+  return state.catalog.find((item) => item.id === state.selectedMcpId);
+}
+
+function configurableMcps() {
+  const installedIds = new Set(state.installed.map((item) => item.id));
+  const installed = state.installed
+    .map((item) => state.catalog.find((entry) => entry.id === item.id))
+    .filter(Boolean);
+  const readyNotInstalled = state.catalog.filter((entry) => {
+    const ready = entry.status === "bundled" || entry.status === "available";
+    return ready && entry.supportedHarnesses?.includes("opencode") && !installedIds.has(entry.id);
+  });
+  return [...installed, ...readyNotInstalled];
+}
+
+function ensureSelectedMcp() {
+  const options = configurableMcps();
+  if (!options.length) return;
+  if (!options.some((item) => item.id === state.selectedMcpId)) {
+    state.selectedMcpId = options[0].id;
+  }
+}
+
 function renderStatus() {
   const kv = $("#statusKv");
   const status = state.status || {};
   const rows = [
+    ["应用版本", status.version],
     ["运行模式", isDesktop ? "桌面 App（Electron IPC，无本地 HTTP 服务）" : "Legacy localhost web server"],
     ["数据目录", status.dataDir],
     ["State", status.statePath],
@@ -75,6 +107,80 @@ function renderStatus() {
     ["已配置 MCP", String(status.configuredMcpCount ?? status.installedCount ?? 0)],
   ];
   kv.innerHTML = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(v || "-")}</dd></div>`).join("");
+}
+
+function formatBytes(size) {
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size > 1024 * 1024 * 1024) return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (size > 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  if (size > 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${size} B`;
+}
+
+function updateTargetUrl() {
+  return state.update?.asset?.url || state.update?.releaseUrl || state.status?.releasePageUrl || "";
+}
+
+function setUpdateBadge(text, tone = "") {
+  const badge = $("#updateBadge");
+  badge.textContent = text;
+  badge.className = `badge ${tone}`.trim();
+}
+
+function renderUpdatePanel() {
+  const summary = $("#updateSummary");
+  const details = $("#updateDetails");
+  const downloadButton = $("#downloadUpdateBtn");
+  const currentVersion = state.status?.version || state.update?.currentVersion || "-";
+  const releaseUrl = state.update?.releaseUrl || state.status?.releasePageUrl || "";
+
+  $("#openReleaseBtn").disabled = !releaseUrl;
+  downloadButton.classList.add("hidden");
+  downloadButton.dataset.url = "";
+
+  if (state.updateChecking) {
+    setUpdateBadge("检查中", "warn");
+    summary.textContent = `当前版本 ${currentVersion}，正在连接 GitHub 检查更新...`;
+    details.innerHTML = "";
+    return;
+  }
+
+  const update = state.update;
+  if (!update) {
+    setUpdateBadge("未检查");
+    summary.textContent = `当前版本 ${currentVersion}。`;
+    details.innerHTML = "";
+    return;
+  }
+
+  if (!update.ok) {
+    setUpdateBadge("检查失败", "warn");
+    summary.textContent = `当前版本 ${currentVersion}，暂时无法获取 GitHub 最新版本。`;
+    details.innerHTML = update.error ? `<p class="muted">${escapeHtml(update.error)}</p>` : "";
+    return;
+  }
+
+  const latest = update.latestVersion ? `v${update.latestVersion}` : "未知版本";
+  const releaseDate = update.releaseDate ? new Date(update.releaseDate).toLocaleString() : "";
+  const asset = update.asset;
+  const assetSize = formatBytes(asset?.size);
+  const assetText = asset ? `${asset.name}${assetSize ? ` · ${assetSize}` : ""}` : "未找到当前平台安装包，可打开发布页手动选择。";
+  details.innerHTML = `
+    <p class="muted">最新版本：${escapeHtml(latest)}${releaseDate ? ` · ${escapeHtml(releaseDate)}` : ""}</p>
+    <p class="muted">更新包：${escapeHtml(assetText)}</p>
+  `;
+
+  if (update.updateAvailable) {
+    setUpdateBadge("有新版本", "warn");
+    summary.textContent = `发现新版本 ${latest}，当前版本 v${currentVersion}。`;
+    downloadButton.textContent = asset ? "下载更新" : "查看更新";
+    downloadButton.dataset.url = updateTargetUrl();
+    downloadButton.classList.remove("hidden");
+    return;
+  }
+
+  setUpdateBadge("已是最新", "ok");
+  summary.textContent = `当前版本 v${currentVersion} 已是 GitHub 最新发布版。`;
 }
 
 function renderInstalled() {
@@ -120,8 +226,8 @@ function renderMarket() {
           <span class="badge ${ready ? "ok" : "warn"}">${ready ? "可用" : "预留"}</span>
         </header>
         <p>${escapeHtml(item.description)}</p>
-        <div class="tags">${item.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
-        <p class="small">支持：${item.supportedHarnesses.map(escapeHtml).join(" / ")}</p>
+        <div class="tags">${(item.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
+        <p class="small">支持：${(item.supportedHarnesses || []).map(escapeHtml).join(" / ")}</p>
         <div class="actions">
           <button class="secondary" ${bundled ? `data-configure-mcp="${escapeHtml(item.id)}"` : `data-install="${escapeHtml(item.id)}"`}>${bundled ? "进入配置" : ready ? "安装" : "查看预留"}</button>
         </div>
@@ -156,17 +262,81 @@ function renderHarnesses() {
   }).join("");
 }
 
-function fillFormFromInstalled() {
-  const item = state.installed.find((x) => x.id === "minimax-bridge");
-  if (!item) return;
-  const env = item.effectiveEnv || {};
-  const form = $("#minimaxForm");
-  for (const [key, value] of Object.entries(env)) {
-    const input = form.elements[key];
-    if (!input) continue;
-    if (input.type === "checkbox") input.checked = value === "true";
-    else if (!isMaskedSecret(value)) input.value = value;
+function renderMcpSelector() {
+  const select = $("#mcpSelect");
+  const options = configurableMcps();
+  select.innerHTML = options.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.displayName)}</option>`).join("");
+  select.value = state.selectedMcpId;
+}
+
+function renderProfileForm() {
+  const entry = selectedCatalogEntry();
+  const installed = selectedInstalled();
+  const fields = entry?.fields || [];
+  const env = installed?.effectiveEnv || {};
+  $("#selectedMcpName").textContent = entry?.displayName || state.selectedMcpId;
+  $("#configTitle").textContent = `配置 OpenCode 使用 ${entry?.displayName || state.selectedMcpId}`;
+  $("#configDescription").textContent = entry
+    ? `${entry.description} API Key 会保存到本机 Harness secrets 文件，不写入 OpenCode 配置。`
+    : "请选择要配置的 MCP。";
+  $("#testApiBtn").textContent = `测试 ${entry?.displayName || "MCP"} API`;
+
+  if (!fields.length) {
+    $("#mcpFields").innerHTML = `<p class="muted">这个 MCP 暂无可配置字段。</p>`;
+    return;
   }
+
+  $("#mcpFields").innerHTML = fields.map((field) => renderField(field, env[field.key])).join("");
+}
+
+function renderField(field, value) {
+  const id = `field_${field.key}`;
+  const required = field.required ? " <b>*</b>" : "";
+  const help = field.help ? `<small>${escapeHtml(field.help)}</small>` : "";
+  const safeValue = isMaskedSecret(value) ? "" : String(value ?? field.default ?? "");
+  const placeholder = isMaskedSecret(value) ? "已保存，留空则不修改" : (field.placeholder || "");
+
+  if (field.type === "boolean") {
+    const checked = String(value ?? field.default ?? "").toLowerCase() === "true";
+    return `
+      <label class="check" for="${escapeHtml(id)}">
+        <input id="${escapeHtml(id)}" name="${escapeHtml(field.key)}" type="checkbox" ${checked ? "checked" : ""} />
+        <span>${escapeHtml(field.label)}${required}${help}</span>
+      </label>
+    `;
+  }
+
+  if (field.type === "select") {
+    const options = (field.options || []).map((option) => {
+      const selected = String(option.value) === String(value ?? field.default ?? "") ? "selected" : "";
+      return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(option.label)}</option>`;
+    }).join("");
+    return `
+      <label for="${escapeHtml(id)}">
+        <span>${escapeHtml(field.label)}${required}</span>
+        <select id="${escapeHtml(id)}" name="${escapeHtml(field.key)}">${options}</select>
+        ${help}
+      </label>
+    `;
+  }
+
+  if (field.type === "textarea") {
+    return `
+      <label for="${escapeHtml(id)}">
+        <span>${escapeHtml(field.label)}${required}</span>
+        <textarea id="${escapeHtml(id)}" name="${escapeHtml(field.key)}" rows="3" placeholder="${escapeHtml(placeholder)}">${escapeHtml(safeValue)}</textarea>
+        ${help}
+      </label>
+    `;
+  }
+
+  return `
+    <label for="${escapeHtml(id)}">
+      <span>${escapeHtml(field.label)}${required}</span>
+      <input id="${escapeHtml(id)}" name="${escapeHtml(field.key)}" type="${field.type === "password" ? "password" : "text"}" autocomplete="off" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(safeValue)}" />
+      ${help}
+    </label>
+  `;
 }
 
 function isMaskedSecret(value) {
@@ -174,12 +344,13 @@ function isMaskedSecret(value) {
 }
 
 async function renderPreview() {
-  const preview = await api("/api/harness/opencode/preview?mcpId=minimax-bridge&profileId=default");
+  const mcpId = state.selectedMcpId;
+  const preview = await api(`/api/harness/opencode/preview?mcpId=${encodeURIComponent(mcpId)}&profileId=default`);
   $("#opencodePreview").textContent = JSON.stringify({
     path: preview.configPath,
     instructions: [preview.instructionRef],
     mcp: {
-      "minimax-bridge": preview.entry,
+      [mcpId]: preview.entry,
     },
   }, null, 2);
 }
@@ -194,53 +365,95 @@ async function loadAll() {
   state.catalog = catalog.catalog;
   state.installed = installed.installed;
   state.clients = installed.clients;
+  ensureSelectedMcp();
   renderStatus();
   renderInstalled();
   renderMarket();
   renderHarnesses();
-  fillFormFromInstalled();
+  renderMcpSelector();
+  renderProfileForm();
+  renderUpdatePanel();
   await renderPreview();
 }
 
+async function checkUpdate({ force = false, silent = false } = {}) {
+  state.updateChecking = true;
+  renderUpdatePanel();
+  try {
+    state.update = await api(`/api/update/check${force ? "?force=1" : ""}`);
+    if (!silent) {
+      if (state.update.updateAvailable) {
+        showAlert(`发现新版本 v${state.update.latestVersion}。可以点击“下载更新”获取安装包。`, "ok");
+      } else if (state.update.ok) {
+        showAlert("当前已经是最新版本。", "ok");
+      } else {
+        showAlert(state.update.error || "检查更新失败。", "error");
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    state.update = {
+      ok: false,
+      currentVersion: state.status?.version || "-",
+      latestVersion: null,
+      latestTag: null,
+      updateAvailable: false,
+      releaseUrl: state.status?.releasePageUrl || "",
+      releaseName: null,
+      releaseDate: null,
+      releaseNotes: null,
+      asset: null,
+      checkedAt: new Date().toISOString(),
+      source: null,
+      error: message,
+    };
+    if (!silent) showAlert(message, "error");
+  } finally {
+    state.updateChecking = false;
+    renderUpdatePanel();
+  }
+}
+
 function collectForm() {
-  const form = $("#minimaxForm");
-  const data = new FormData(form);
+  const form = $("#mcpProfileForm");
+  const entry = selectedCatalogEntry();
   const env = {};
   const secrets = {};
-  const secretKeys = new Set(["MINIMAX_API_KEY", "MINIMAX_PLAN_API_KEY"]);
-  for (const [key, raw] of data.entries()) {
-    const value = String(raw).trim();
-    if (secretKeys.has(key)) secrets[key] = value;
-    else env[key] = value;
+  for (const field of entry?.fields || []) {
+    const input = form.elements[field.key];
+    if (!input) continue;
+    const value = input.type === "checkbox" ? (input.checked ? "true" : "false") : String(input.value || "").trim();
+    if (field.secret) secrets[field.key] = value;
+    else env[field.key] = value;
   }
-  env.MINIMAX_ENABLE_OFFICIAL_MCP_PROXY = form.elements.MINIMAX_ENABLE_OFFICIAL_MCP_PROXY.checked ? "true" : "false";
-  env.MINIMAX_ENABLE_TOKEN_PLAN_PROXY = form.elements.MINIMAX_ENABLE_TOKEN_PLAN_PROXY.checked ? "true" : "false";
   return { env, secrets };
 }
 
 async function saveProfile({ silent = false } = {}) {
   const { env, secrets } = collectForm();
+  const mcpId = state.selectedMcpId;
   await api("/api/mcp/profile", {
     method: "POST",
-    body: JSON.stringify({ mcpId: "minimax-bridge", profileId: "default", env, secrets }),
+    body: JSON.stringify({ mcpId, profileId: "default", env, secrets }),
   });
   await loadAll();
-  if (!silent) showAlert("已保存 MiniMax MCP profile。OpenCode 配置尚未修改。再点击“保存并配置到 OpenCode”即可启用。", "ok");
+  if (!silent) showAlert(`已保存 ${selectedCatalogEntry()?.displayName || mcpId} profile。OpenCode 配置尚未修改。`, "ok");
 }
 
 async function runProbe(mode) {
   await saveProfile({ silent: true });
-  $("#probeResult").textContent = mode === "api" ? "正在测试 MiniMax API..." : "正在测试 MCP 启动和工具列表...";
+  const mcpName = selectedCatalogEntry()?.displayName || state.selectedMcpId;
+  $("#probeResult").textContent = mode === "api" ? `正在测试 ${mcpName} API...` : "正在测试 MCP 启动和工具列表...";
   const result = await api("/api/mcp/test", {
     method: "POST",
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mcpId: state.selectedMcpId, profileId: "default", mode }),
   });
   $("#probeResult").textContent = JSON.stringify(result, null, 2);
   const passed = result.ok !== false;
   showAlert(
     passed
-      ? (mode === "api" ? "MiniMax API 测试通过。" : "MCP 启动和工具探测通过。")
-      : (mode === "api" ? "MiniMax API 测试未通过，请检查 API Key。" : "MCP 启动或工具探测未通过。"),
+      ? (mode === "api" ? `${mcpName} API 测试通过。` : "MCP 启动和工具探测通过。")
+      : (mode === "api" ? `${mcpName} API 测试未通过，请检查 API Key。` : "MCP 启动或工具探测未通过。"),
     passed ? "ok" : "error",
   );
 }
@@ -248,12 +461,18 @@ async function runProbe(mode) {
 async function applyOpenCode(event) {
   event?.preventDefault();
   const { env, secrets } = collectForm();
+  const mcpId = state.selectedMcpId;
   const result = await api("/api/harness/opencode/apply", {
     method: "POST",
-    body: JSON.stringify({ mcpId: "minimax-bridge", profileId: "default", enabled: true, env, secrets }),
+    body: JSON.stringify({ mcpId, profileId: "default", enabled: true, env, secrets }),
   });
   await loadAll();
-  showAlert(`已写入 OpenCode 配置：${result.configPath}${result.backupPath ? `；备份：${result.backupPath}` : ""}。重新打开 OpenCode 后即可使用 minimax-bridge MCP。`, "ok");
+  showAlert(`已写入 OpenCode 配置：${result.configPath}${result.backupPath ? `；备份：${result.backupPath}` : ""}。重新打开 OpenCode 后即可使用 ${mcpId} MCP。`, "ok");
+}
+
+function openExternalUrl(url) {
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function escapeHtml(value) {
@@ -267,18 +486,30 @@ function escapeHtml(value) {
 
 $all(".nav").forEach((button) => button.addEventListener("click", () => switchPage(button.dataset.page)));
 $("#backToHarnessesBtn").addEventListener("click", () => switchPage("harnesses"));
+$("#mcpSelect").addEventListener("change", async (event) => {
+  state.selectedMcpId = event.target.value;
+  renderProfileForm();
+  await renderPreview();
+});
 $("#refreshBtn").addEventListener("click", async () => {
   await loadAll();
   showAlert("已刷新。", "ok");
 });
+$("#checkUpdateBtn").addEventListener("click", () => checkUpdate({ force: true }).catch((error) => showAlert(error.message, "error")));
+$("#downloadUpdateBtn").addEventListener("click", () => openExternalUrl($("#downloadUpdateBtn").dataset.url || updateTargetUrl()));
+$("#openReleaseBtn").addEventListener("click", () => openExternalUrl(state.update?.releaseUrl || state.status?.releasePageUrl));
 $("#saveProfileBtn").addEventListener("click", () => saveProfile().catch((error) => showAlert(error.message, "error")));
 $("#testStartupBtn").addEventListener("click", () => runProbe("startup").catch((error) => showAlert(error.message, "error")));
 $("#testApiBtn").addEventListener("click", () => runProbe("api").catch((error) => showAlert(error.message, "error")));
-$("#minimaxForm").addEventListener("submit", (event) => applyOpenCode(event).catch((error) => showAlert(error.message, "error")));
+$("#mcpProfileForm").addEventListener("submit", (event) => applyOpenCode(event).catch((error) => showAlert(error.message, "error")));
 $("#marketGrid").addEventListener("click", async (event) => {
   const configureButton = event.target.closest("[data-configure-mcp]");
-  if (configureButton?.dataset.configureMcp === "minimax-bridge") {
+  if (configureButton?.dataset.configureMcp) {
+    state.selectedMcpId = configureButton.dataset.configureMcp;
     switchPage("configure");
+    renderMcpSelector();
+    renderProfileForm();
+    await renderPreview();
     return;
   }
   const button = event.target.closest("[data-install]");
@@ -301,4 +532,6 @@ $("#harnessList").addEventListener("click", (event) => {
   if (id === "opencode") switchPage("configure");
 });
 
-loadAll().catch((error) => showAlert(error.message, "error"));
+loadAll()
+  .then(() => checkUpdate({ silent: true }))
+  .catch((error) => showAlert(error.message, "error"));

@@ -53,3 +53,9 @@ Desktop.ini
 
 # Local launchers
 MCP Harness.cmd
+
+# Tutorial / media
+mcp安装教程/
+*.mp4
+*.mov
+*.avi
