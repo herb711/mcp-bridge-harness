@@ -114,6 +114,7 @@
         { "target": "dmg", "arch": ["x64", "arm64"] }
       ],
       "category": "public.app-category.developer-tools",
+      "icon": "logo.png",
       "artifactName": "mcp-harness-${version}-${arch}-dmg.${ext}"
     },
     "dmg": {
@@ -124,6 +125,7 @@
         { "target": "AppImage", "arch": ["x64"] }
       ],
       "category": "Development",
+      "icon": "logo.png",
       "artifactName": "mcp-harness-${version}-${arch}-appimage.${ext}"
     }
   }
