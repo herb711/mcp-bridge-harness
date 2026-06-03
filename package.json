@@ -86,7 +86,7 @@
     ],
     "asar": true,
     "asarUnpack": [],
-    "icon": "logo.ico",
+    "icon": "logo.png",
     "extraMetadata": {
       "main": "desktop/main.cjs"
     },
@@ -95,7 +95,7 @@
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
-      "icon": "logo.ico"
+      "icon": "logo.png"
     },
     "nsis": {
       "oneClick": false,
