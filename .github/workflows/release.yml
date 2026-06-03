@@ -63,20 +63,20 @@ jobs:
 
       - name: Build Electron desktop app (Windows)
         if: matrix.os == 'windows-latest'
-        run: npx --no-install electron-builder --win --x64 --publish never --config.appVersion=${{ steps.ver.outputs.version }} --config.buildVersion=${{ steps.ver.outputs.version }}
+        run: npx --no-install electron-builder --win --x64 --publish never --config.buildVersion=${{ steps.ver.outputs.version }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ''
 
       - name: Build Electron desktop app (macOS)
         if: startsWith(matrix.os, 'macos')
-        run: npx --no-install electron-builder --mac --${{ matrix.arch }} --publish never --config.appVersion=${{ steps.ver.outputs.version }} --config.buildVersion=${{ steps.ver.outputs.version }}
+        run: npx --no-install electron-builder --mac --${{ matrix.arch }} --publish never --config.buildVersion=${{ steps.ver.outputs.version }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Build Electron desktop app (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: npx --no-install electron-builder --linux --x64 --publish never --config.appVersion=${{ steps.ver.outputs.version }} --config.buildVersion=${{ steps.ver.outputs.version }}
+        run: npx --no-install electron-builder --linux --x64 --publish never --config.buildVersion=${{ steps.ver.outputs.version }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
