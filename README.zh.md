@@ -324,3 +324,7 @@ npm run serve
 - 修改 OpenCode 配置前会自动备份。
 - 读取 JSONC 时支持注释和 trailing comma，但写回会格式化成标准 JSON。
 - v0.1 的 secrets 存储是本地文件；后续建议升级到 Windows Credential Manager、macOS Keychain、Linux Secret Service。
+
+## 许可证
+
+本项目基于 Apache License 2.0 协议开源。

@@ -324,3 +324,7 @@ npm run serve
 - OpenCode config is auto-backed up before each write.
 - JSONC reading supports comments and trailing commas; writes are reformatted as standard JSON.
 - v0.1 stores secrets in a local file; future versions are expected to upgrade to Windows Credential Manager, macOS Keychain, and Linux Secret Service.
+
+## License
+
+This project is licensed under the Apache License 2.0.
