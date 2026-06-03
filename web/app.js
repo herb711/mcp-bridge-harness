@@ -460,14 +460,46 @@ async function runProbe(mode) {
 
 async function applyOpenCode(event) {
   event?.preventDefault();
-  const { env, secrets } = collectForm();
-  const mcpId = state.selectedMcpId;
-  const result = await api("/api/harness/opencode/apply", {
-    method: "POST",
-    body: JSON.stringify({ mcpId, profileId: "default", enabled: true, env, secrets }),
-  });
-  await loadAll();
-  showAlert(`已写入 OpenCode 配置：${result.configPath}${result.backupPath ? `；备份：${result.backupPath}` : ""}。重新打开 OpenCode 后即可使用 ${mcpId} MCP。`, "ok");
+  const button = event?.submitter || $("#applyOpenCodeBtn");
+  const originalText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在写入 OpenCode...";
+  }
+  $("#probeResult").textContent = "正在保存 profile，并写入 OpenCode 配置...";
+
+  try {
+    const { env, secrets } = collectForm();
+    const mcpId = state.selectedMcpId;
+    const result = await api("/api/harness/opencode/apply", {
+      method: "POST",
+      body: JSON.stringify({ mcpId, profileId: "default", enabled: true, env, secrets }),
+    });
+    $("#probeResult").textContent = JSON.stringify({
+      ok: true,
+      action: "apply-opencode",
+      mcpId,
+      configPath: result.configPath,
+      backupPath: result.backupPath || null,
+      instructionPath: result.instructionPath,
+      entry: result.entry,
+    }, null, 2);
+    await loadAll();
+    showAlert(`已写入 OpenCode 配置：${result.configPath}${result.backupPath ? `；备份：${result.backupPath}` : ""}。重新打开 OpenCode 后即可使用 ${mcpId} MCP。`, "ok");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    $("#probeResult").textContent = JSON.stringify({
+      ok: false,
+      action: "apply-opencode",
+      error: message,
+    }, null, 2);
+    throw error;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText || "保存并配置到 OpenCode";
+    }
+  }
 }
 
 function openExternalUrl(url) {

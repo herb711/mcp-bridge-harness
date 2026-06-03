@@ -1,22 +1,27 @@
 # MCP Harness
 
-MCP Harness 是一个本地 MCP 管家桌面程序：它在本机提供可视化界面，用来安装、配置、启用和分发 MCP 到不同的编程 Agent / Harness。
+> Open-source local tool for managing MCP servers and connecting them to coding agents.
 
-当前版本已经完成：
+[English](README.md) · [中文](README.zh.md)
 
-- 桌面 App 入口：`npm run app` / `npm run harness`
-- Electron IPC 调用本地 Harness 逻辑，不再把 localhost Web Dashboard 作为主架构
-- 安装时自动注册内置 `MiniMax Bridge MCP`
-- 可视化配置 MiniMax API Key、输出目录、官方 MiniMax MCP Proxy、Token Plan Proxy 等参数
-- OpenCode 自动配置入口移动到：`Harness 目标 → OpenCode → 进入配置 OpenCode`
-- 一键写入 OpenCode 全局配置
-- OpenCode 重启后可直接使用 `minimax-bridge` MCP
-- 预留 MCP 市场页面：后续可扩展下载、签名校验、健康检查、多 Harness 同步
-- 预留 Harness Adapter：Codex、Claude Code、Cursor、VS Code
+**mcp-bridge-harness** is an open-source local tool for managing MCP servers and connecting them to coding agents such as OpenCode, Codex-compatible workflows, Claude Code workflows, and other developer harnesses.
 
-> 第一版重点先打通 OpenCode。OpenCode 配置文件只写入 MCP 启动命令和 `MCP_HARNESS_HOME`，不会写入 MiniMax API Key。
+It is delivered as a cross-platform desktop application (Electron) that gives developers one local place to install, configure, version-pin, and distribute Model Context Protocol (MCP) servers into the AI coding agent of their choice — without hand-editing per-agent JSON config files or writing API keys into them.
 
-## 项目定位
+## What it does
+
+- **Local-first desktop app** — Electron shell; MCP binaries, secrets, and state live in a per-user data directory. No cloud account, no telemetry, no per-seat license.
+- **Agent-agnostic distribution** — install an MCP server once and hand it off to OpenCode, Codex-compatible workflows, Claude Code workflows, Cursor, VS Code, and other developer harnesses through pluggable adapters.
+- **Secret-safe configuration** — API keys stay in a local `secrets.json`; the agent config only receives `MCP_HARNESS_HOME` and a stdio command, never the key itself.
+- **Cross-platform installers** — NSIS installer + portable `.exe` on Windows, `.dmg` on macOS, `.AppImage` on Linux, all built with `electron-builder`.
+- **Catalog-ready** — built-in slots for download URL, checksum / signature, health check, version pinning, and per-agent adapter output.
+
+## Current scope (v0.2)
+
+- **Shipped** — desktop app shell (Electron + IPC); local Harness state / secrets / logs; OpenCode adapter that writes `opencode.json` with auto-backup; bundled `minimax-bridge` MCP (search, image, video, speech, music, voice clone).
+- **Reserved** — Codex, Claude Code, Cursor, VS Code adapters; MCP marketplace UI (download, sign, health check, multi-agent sync).
+
+## Architecture
 
 ```text
 MCP Harness Desktop App
@@ -33,45 +38,46 @@ MCP Harness Desktop App
       └─ MiniMax Bridge MCP ✅
 ```
 
-`src/harness/server.ts` 仍保留，但只是 legacy / development fallback：
+`src/harness/server.ts` is still kept, but only as a legacy / development fallback:
 
 ```bash
 npm run serve
 ```
 
-主入口是桌面 App，不要求用户手动打开浏览器访问 `127.0.0.1`。
+The main entry point is the desktop App — users are not required to manually open a browser to `127.0.0.1`.
 
-## 快速开始
+## Quick start
 
-### Windows（用户）
+### Windows (end user)
 
-直接下载 release 页面里的安装包：
+Download the installer from the release page:
 
 ```text
-mcp-harness-0.2.0-x64-setup.exe   # NSIS 安装包（推荐，会创建桌面 + 开始菜单快捷方式）
-mcp-harness-0.2.0-x64-portable.exe  # 免安装绿色版，双击即可运行
+mcp-harness-0.2.0-x64-setup.exe    # NSIS installer (recommended; creates desktop + Start Menu shortcuts)
+mcp-harness-0.2.0-x64-portable.exe # Portable single-file build, double-click to run
 ```
 
-下载后双击 `mcp-harness-0.2.0-x64-setup.exe`：
+After downloading, double-click `mcp-harness-0.2.0-x64-setup.exe`:
 
-1. 选择安装目录（默认 `C:\Program Files\MCP Harness`）。
-2. 勾选「创建桌面快捷方式」和「创建开始菜单快捷方式」。
-3. 安装完成，桌面会出现 **MCP Harness** 图标。
-4. 双击图标即可启动本地 MCP 管家桌面程序。
+1. Pick an install directory (default `C:\Program Files\MCP Harness`).
+2. Tick "Create desktop shortcut" and "Create Start Menu shortcut".
+3. Finish the install. The **MCP Harness** icon appears on your desktop.
+4. Double-click the icon to launch the local MCP manager.
 
-### MCP 安装教程
+### Video tutorials
 
-如需视频教程，可参考：[MCP 安装教程（Bilibili）](https://www.bilibili.com/video/BV1dj5F6aEJa/?vd_source=a58871624315dd079f4e4f7f33690416)
+- **Install tutorial**: [MCP Harness install tutorial (YouTube)](https://youtu.be/TSdHCuhQUGA)
+- **Advanced usage tutorial**: [MCP Harness advanced usage tutorial (YouTube)](https://youtu.be/G-Q3wbpxyR8)
 
-### Windows（开发）
+### Windows (development)
 
-双击：
+Double-click:
 
 ```bat
 install.bat
 ```
 
-或者命令行：
+Or from the command line:
 
 ```bat
 npm install
@@ -79,18 +85,18 @@ npm run build
 npm run app
 ```
 
-### macOS / Linux（用户）
+### macOS / Linux (end user)
 
-下载 `mcp-harness-0.2.0-*.dmg` 或 `mcp-harness-0.2.0-*.AppImage`，分别拖入 `Applications` 或 `chmod +x` 后双击运行。
+Download `mcp-harness-0.2.0-*.dmg` or `mcp-harness-0.2.0-*.AppImage`. Drag the `.dmg` to `Applications`, or `chmod +x` the `.AppImage` and double-click to run.
 
-### macOS / Linux（开发）
+### macOS / Linux (development)
 
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-或者：
+Or:
 
 ```bash
 npm install
@@ -98,100 +104,100 @@ npm run build
 npm run app
 ```
 
-## 打包桌面安装包
+## Building desktop installers
 
 ```bash
-# 仅 Windows（NSIS 安装包 + 绿色版）
+# Windows only (NSIS installer + portable build)
 npm run dist:win
 
-# 跨平台
+# Cross-platform
 npm run dist:mac
 npm run dist:linux
-npm run release:desktop   # 当前平台 + 重新生成 agent.manifest.json
+npm run release:desktop   # current platform + regenerates agent.manifest.json
 ```
 
-构建产物统一输出到 `release/desktop/`：
+All build artifacts go to `release/desktop/`:
 
 ```text
-mcp-harness-0.2.0-x64-setup.exe      # NSIS 安装包
-mcp-harness-0.2.0-x64-portable.exe   # 免安装单文件
-mcp-harness-0.2.0-arm64-dmg.dmg      # macOS
+mcp-harness-0.2.0-x64-setup.exe       # NSIS installer
+mcp-harness-0.2.0-x64-portable.exe    # Portable single-file
+mcp-harness-0.2.0-arm64-dmg.dmg       # macOS
 mcp-harness-0.2.0-x64-appimage.AppImage  # Linux
-win-unpacked/                        # 解包后的运行目录（用于调试）
+win-unpacked/                         # Unpacked runtime dir (for debugging)
 ```
 
-构建基于 `electron-builder` + NSIS：
+The build is based on `electron-builder` + NSIS:
 
 - `appId`: `com.mcpharness.desktop`
-- 安装时自动创建桌面图标和「开始菜单 → MCP Harness」快捷方式
-- 默认 `oneClick=false`，允许选择安装目录
-- `perMachine=false`，装在当前用户下，不需要管理员
-- 卸载时保留 `appDataDir` 下的本地数据
+- Installer auto-creates the desktop icon and a "Start Menu → MCP Harness" shortcut.
+- `oneClick=false` by default; the user can pick the install directory.
+- `perMachine=false` — installed per user, no admin required.
+- Uninstall keeps the local data under `appDataDir`.
 
-> 注意：当前主机如果在 Synology Drive / OneDrive 这类同步盘下构建，`rcedit` 写图标时会被驱动拦截（`Unable to commit changes`）。这是非致命错误，**安装包仍然能正常生成并运行**，只是不会嵌入自定义图标。解决办法是把源码 `Copy-Item` 到本地目录（如 `%TEMP%`）后在那里执行 `npm install && npm run dist:win`。
+> Note: when building on a host whose working directory is on a sync drive (Synology Drive, OneDrive, etc.), `rcedit` may be blocked from writing the icon (`Unable to commit changes`). This is a non-fatal warning — the installer is still produced and runs correctly, but won't embed the custom icon. The workaround is to `Copy-Item` the source tree to a local path (e.g. `%TEMP%`) and run `npm install && npm run dist:win` from there.
 
-## 安装脚本
+## Install scripts
 
-`install.bat` / `install.sh` 仅用于开发环境，从源码直接跑 Electron。普通用户请直接下载 release 里的安装包。
+`install.bat` / `install.sh` are for development only — they run Electron straight from source. End users should download the release installer.
 
-它们会：
+They will:
 
-1. 安装依赖，包括 Electron 桌面运行时。
-2. 构建 TypeScript 项目。
-3. 初始化本地数据目录。
-4. 自动把内置 MiniMax Bridge MCP 安装到 Harness state。
-5. 打开 MCP Harness 桌面 App。
+1. Install dependencies, including the Electron desktop runtime.
+2. Build the TypeScript project.
+3. Initialize the local data directory.
+4. Auto-install the bundled `minimax-bridge` MCP into the Harness state.
+5. Open the MCP Harness desktop App.
 
-## 使用方式
+## Usage
 
-启动桌面管理器：
+Start the desktop manager:
 
 ```bash
 npm run app
 ```
 
-或：
+Or:
 
 ```bash
 npm run harness
 ```
 
-打开桌面 App 后进入：
+Once the desktop app is open, go to:
 
 ```text
-Harness 目标 → OpenCode → 进入配置 OpenCode
+Harness target → OpenCode → Configure OpenCode
 ```
 
-然后：
+Then:
 
-1. 填入 MiniMax API Key。
-2. 确认 API Host、输出目录、TTS 模式。
-3. 默认启用官方 MiniMax MCP Proxy，官方 `minimax-mcp-js` 已支持的生成工具会优先转发到官方 MCP。
-4. 按需启用 Token Plan MCP Proxy。
-5. 点击 **保存并配置到 OpenCode**。
-6. 重新打开 OpenCode，即可直接使用 `minimax-bridge` MCP。
+1. Fill in the MiniMax API Key.
+2. Confirm the API host, output directory, and TTS mode.
+3. The official MiniMax MCP Proxy is enabled by default; generation tools already supported by the official `minimax-mcp-js` will be proxied there first.
+4. Optionally enable the Token Plan MCP Proxy.
+5. Click **Save and configure into OpenCode**.
+6. Reopen OpenCode, and the `minimax-bridge` MCP is available immediately.
 
-MCP Harness 会写入：
+MCP Harness writes to:
 
 ```text
 ~/.config/opencode/opencode.json
 ```
 
-Windows 上同样使用用户目录下的：
+On Windows, the same path resolves to:
 
 ```text
 %USERPROFILE%\.config\opencode\opencode.json
 ```
 
-写入前会自动备份原配置，例如：
+Before writing, the original config is backed up automatically, e.g.:
 
 ```text
 opencode.json.bak-2026-05-31T15-00-00-000Z
 ```
 
-## OpenCode 写入示例
+## OpenCode write example
 
-MCP Harness 会把 OpenCode 配置合并成类似这样：
+MCP Harness merges the OpenCode config into something like:
 
 ```json
 {
@@ -217,81 +223,81 @@ MCP Harness 会把 OpenCode 配置合并成类似这样：
 }
 ```
 
-API Key 不写入 `opencode.json`。它保存在本机 Harness data 目录下的 `secrets.json`，OpenCode 启动 MCP 时只拿到 `MCP_HARNESS_HOME`，由内置 MCP 读取本地 profile。
+The API key is **not** written into `opencode.json`. It is stored in `secrets.json` inside the local Harness data directory. When OpenCode starts the MCP, it only receives `MCP_HARNESS_HOME`; the bundled MCP reads the local profile from there.
 
-## 本地数据目录
+## Local data directory
 
-默认路径：
+Default paths:
 
-| 系统 | 路径 |
+| OS | Path |
 |---|---|
 | Windows | `%LOCALAPPDATA%\McpHarness` |
 | macOS | `~/Library/Application Support/McpHarness` |
 | Linux | `~/.local/share/mcp-harness` |
 
-可用环境变量覆盖：
+Override with the env var:
 
 ```bash
 MCP_HARNESS_HOME=/custom/path npm run app
 ```
 
-目录中会保存：
+Files stored in the directory:
 
 ```text
-state.json       # 已安装 MCP、Harness 绑定状态
-secrets.json     # 本机 profile secrets，POSIX 系统会尝试 chmod 600
-catalog.json     # 内置市场快照
-outputs/minimax  # 默认生成文件输出目录
-logs/harness.log # 安装/配置日志
+state.json       # installed MCPs, harness binding state
+secrets.json     # local profile secrets; POSIX systems attempt chmod 600
+catalog.json     # bundled catalog snapshot
+outputs/minimax  # default output dir for generated files
+logs/harness.log # install / config logs
 ```
 
-## 命令
+## Commands
 
 ```bash
-# 启动桌面 App
+# Start the desktop app
 node dist/index.js app
 
-# 初始化 Harness 本地状态
+# Initialize Harness local state
 node dist/index.js install
 
-# 初始化并打开桌面 App
+# Initialize and open the desktop app
 node dist/index.js install --open
 
-# legacy localhost web dashboard，仅开发/兼容用途
+# Legacy localhost web dashboard (dev / compatibility only)
 node dist/index.js serve
 
-# OpenCode 实际启动的 MCP stdio 命令
+# The actual stdio command OpenCode runs to start the MCP
 node dist/index.js mcp minimax-bridge --profile default
 
-# 查看 MCP manifest
+# Print the MCP manifest
 node dist/index.js --manifest
 
-# 查看工具列表
+# List tools
 node dist/index.js --tools
 ```
 
-为了兼容旧版 `minimax-bridge-mcp`，直接运行 `node dist/index.js` 仍会启动 MiniMax Bridge MCP stdio server。
+For backwards compatibility with the old `minimax-bridge-mcp`, running `node dist/index.js` directly still starts the MiniMax Bridge MCP stdio server.
 
-## MCP 市场预留
+## MCP marketplace (reserved)
 
-`web/` 页面和 `src/harness/catalog.ts` 已经预留市场结构。当前内置：
+The `web/` pages and `src/harness/catalog.ts` already reserve the marketplace structure. Currently bundled:
 
-- `minimax-bridge`：可安装、可配置、可写入 OpenCode
-- `github-mcp`：预留
-- `playwright-mcp`：预留
-- `filesystem-mcp`：预留
+- `minimax-bridge` — installable, configurable, written into OpenCode
+- `github-mcp` — reserved
+- `playwright-mcp` — reserved
+- `filesystem-mcp` — reserved
 
-后续可以为每个 catalog entry 增加：
+Each catalog entry can later grow:
 
-- 下载 URL / GitHub Release / npm / uvx / Docker
-- 签名或 checksum 校验
-- 安装目录和版本锁定
-- secrets schema
-- permission schema
-- health check：`initialize`、`tools/list`、smoke test
-- Adapter 输出：OpenCode、Codex、Claude Code、Cursor、VS Code
+- Download URL / GitHub Release / npm / uvx / Docker
+- Signature or checksum verification
+- Install directory and version pinning
+- Secrets schema
+- Permission schema
+- Health check: `initialize`, `tools/list`, smoke test
+- Adapter outputs: OpenCode, Codex, Claude Code, Cursor, VS Code
 
-## 开发
+## Development
 
 ```bash
 npm install
@@ -299,22 +305,22 @@ npm run build
 npm run app
 ```
 
-MCP server 开发：
+MCP server development:
 
 ```bash
 npm run dev:mcp
 ```
 
-Legacy localhost dashboard：
+Legacy localhost dashboard:
 
 ```bash
 npm run serve
 ```
 
-## 重要说明
+## Notes
 
-- 桌面 App 使用 Electron IPC 调用本地逻辑，不以 localhost HTTP server 作为主架构。
-- `web/` 是桌面 renderer 资源，不代表传统服务器后端结构。
-- 修改 OpenCode 配置前会自动备份。
-- 读取 JSONC 时支持注释和 trailing comma，但写回会格式化成标准 JSON。
-- v0.1 的 secrets 存储是本地文件；后续建议升级到 Windows Credential Manager、macOS Keychain、Linux Secret Service。
+- The desktop app uses Electron IPC to call local logic; it is **not** architected around a localhost HTTP server.
+- `web/` holds the desktop renderer assets, not a traditional server backend.
+- OpenCode config is auto-backed up before each write.
+- JSONC reading supports comments and trailing commas; writes are reformatted as standard JSON.
+- v0.1 stores secrets in a local file; future versions are expected to upgrade to Windows Credential Manager, macOS Keychain, and Linux Secret Service.

@@ -14,6 +14,11 @@
       "id": "minimax-bridge",
       "command": ["node", "dist/index.js", "mcp", "minimax-bridge", "--profile", "default"],
       "supportedHarnesses": ["opencode"]
+    },
+    {
+      "id": "cc-mcp",
+      "command": ["node", "dist/index.js", "mcp", "cc-mcp", "--profile", "default"],
+      "supportedHarnesses": ["opencode", "claude-code"]
     }
   ]
 }

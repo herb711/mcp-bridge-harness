@@ -120,6 +120,8 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
   if (!minimax) throw new Error("Bundled catalog is missing minimax-bridge.");
   const agnes = getCatalogEntry("agnes");
   if (!agnes) throw new Error("Bundled catalog is missing agnes.");
+  const ccMcp = getCatalogEntry("cc-mcp");
+  if (!ccMcp) throw new Error("Bundled catalog is missing cc-mcp.");
 
   if (!state.installed["minimax-bridge"]) {
     const now = nowIso();
@@ -205,6 +207,72 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
     }
   }
 
+  if (!state.installed["cc-mcp"]) {
+    const now = nowIso();
+    state.installed["cc-mcp"] = {
+      id: "cc-mcp",
+      profileId: "default",
+      displayName: ccMcp.displayName,
+      version: ccMcp.version,
+      source: "bundled",
+      enabled: true,
+      installedAt: now,
+      updatedAt: now,
+      env: {
+        CC_CLAUDE_RUNTIME: "wsl",
+        CC_CLAUDE_COMMAND: "wsl.exe",
+        CC_CLAUDE_COMMAND_ARGS: "[\"--\",\"claude\"]",
+        CC_CLAUDE_MODEL: "",
+        CC_CLAUDE_MAX_TURNS: "20",
+        CC_CLAUDE_TIMEOUT_MS: "1800000",
+        CC_CLAUDE_WORKDIR: "",
+        CC_CLAUDE_SKIP_PERMISSIONS: "true",
+        CC_CLAUDE_STRICT_MCP_CONFIG: "true",
+        CC_CLAUDE_WSL: "true",
+      },
+      secretKeys: [],
+      targetHarnesses: ["opencode", "claude-code"],
+    };
+    changed = true;
+  }
+
+  const installedCcMcp = state.installed["cc-mcp"];
+  if (installedCcMcp) {
+    const envDefaults: Record<string, string> = {
+      CC_CLAUDE_RUNTIME: "wsl",
+      CC_CLAUDE_COMMAND: "wsl.exe",
+      CC_CLAUDE_COMMAND_ARGS: "[\"--\",\"claude\"]",
+      CC_CLAUDE_MAX_TURNS: "20",
+      CC_CLAUDE_TIMEOUT_MS: "1800000",
+      CC_CLAUDE_SKIP_PERMISSIONS: "true",
+      CC_CLAUDE_STRICT_MCP_CONFIG: "true",
+      CC_CLAUDE_WSL: "true",
+    };
+    for (const [key, value] of Object.entries(envDefaults)) {
+      if (installedCcMcp.env[key] == null || installedCcMcp.env[key] === "") {
+        installedCcMcp.env[key] = value;
+        changed = true;
+      }
+    }
+    const hasOldLocalDefaults =
+      (!installedCcMcp.env.CC_CLAUDE_RUNTIME || installedCcMcp.env.CC_CLAUDE_RUNTIME === "wsl") &&
+      installedCcMcp.env.CC_CLAUDE_COMMAND === "claude" &&
+      (!installedCcMcp.env.CC_CLAUDE_COMMAND_ARGS || installedCcMcp.env.CC_CLAUDE_COMMAND_ARGS === "[]") &&
+      installedCcMcp.env.CC_CLAUDE_WSL === "false";
+    if (process.platform === "win32" && hasOldLocalDefaults) {
+      installedCcMcp.env.CC_CLAUDE_RUNTIME = "wsl";
+      installedCcMcp.env.CC_CLAUDE_COMMAND = "wsl.exe";
+      installedCcMcp.env.CC_CLAUDE_COMMAND_ARGS = "[\"--\",\"claude\"]";
+      installedCcMcp.env.CC_CLAUDE_WSL = "true";
+      changed = true;
+    }
+    const targetHarnesses: HarnessId[] = ["opencode", "claude-code"];
+    if (targetHarnesses.some((item) => !installedCcMcp.targetHarnesses.includes(item))) {
+      installedCcMcp.targetHarnesses = Array.from(new Set([...installedCcMcp.targetHarnesses, ...targetHarnesses]));
+      changed = true;
+    }
+  }
+
   const profileKey = profileKeyFor("minimax-bridge", "default");
   if (!secrets.profiles[profileKey]) {
     secrets.profiles[profileKey] = {};
@@ -213,6 +281,11 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
   const agnesProfileKey = profileKeyFor("agnes", "default");
   if (!secrets.profiles[agnesProfileKey]) {
     secrets.profiles[agnesProfileKey] = {};
+    await writeSecrets(secrets);
+  }
+  const ccMcpProfileKey = profileKeyFor("cc-mcp", "default");
+  if (!secrets.profiles[ccMcpProfileKey]) {
+    secrets.profiles[ccMcpProfileKey] = {};
     await writeSecrets(secrets);
   }
 

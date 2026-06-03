@@ -23,11 +23,13 @@ export interface OpenCodeConfig {
 const MCP_TIMEOUT_MS: Record<string, number> = {
   "minimax-bridge": 120000,
   agnes: 600000,
+  "cc-mcp": 1800000,
 };
 
 const INSTRUCTION_FILES: Record<string, string> = {
   "minimax-bridge": "mcp-harness-minimax.instructions.md",
   agnes: "mcp-harness-agnes.instructions.md",
+  "cc-mcp": "mcp-harness-cc-mcp.instructions.md",
 };
 
 const MINIMAX_INSTRUCTION_TEXT = `# MCP Harness MiniMax Routing
@@ -53,6 +55,20 @@ Use the Agnes MCP proactively for Agnes image and video generation. The user sho
 - If the user provides a local image file, ask for a URL that Agnes can fetch unless the file has already been uploaded somewhere accessible.
 `;
 
+const CC_MCP_INSTRUCTION_TEXT = `# MCP Harness CC MCP Routing
+
+Use CC MCP as a delegated local coding executor, not as a chat assistant.
+
+- You are the orchestrator: understand the user request, inspect the project when needed, decompose work, communicate with the user, and verify the result.
+- Delegate only concrete coding subtasks to cc-mcp_delegate_coding_task. Good modes are implement, debug, refactor, test, review, and inspect.
+- Do not delegate vague planning, product judgment, user-facing explanation, or tasks that require asking the user for clarification.
+- Before delegation, provide workspace, mode, task, relevant context, constraints, target files when known, and acceptance criteria.
+- After the worker returns, review the structured report, inspect claimed changes when needed, decide whether acceptance criteria are met, and either continue with another delegated subtask or summarize the final result.
+- Do not blindly trust the worker result. If the task is simple enough to complete directly, do it directly instead of delegating.
+- Claude Code may send progress through the temporary callback MCP. Read the final cc-mcp result, including callbacks, before responding.
+- For diagnostics, call cc-mcp_claude_code_status to check whether the configured Claude Code command is available.
+`;
+
 function backupStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -62,6 +78,7 @@ function instructionFileForMcp(mcpId: string): string {
 }
 
 function instructionTextForMcp(mcpId: string): string {
+  if (mcpId === "cc-mcp") return CC_MCP_INSTRUCTION_TEXT;
   return mcpId === "agnes" ? AGNES_INSTRUCTION_TEXT : MINIMAX_INSTRUCTION_TEXT;
 }
 

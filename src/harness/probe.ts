@@ -12,6 +12,7 @@ export interface ProbeResult {
   tools: string[];
   voiceProbe?: unknown;
   imageProbe?: unknown;
+  ccStatus?: unknown;
   apiProbe?: unknown;
 }
 
@@ -92,7 +93,7 @@ export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge",
     await client.connect(transport);
     const listed = await client.listTools(undefined, { timeout: 15000 });
     const tools = listed.tools.map((tool) => tool.name).sort();
-    const expectedTool = mcpId === "agnes" ? "image_21_flash" : "list_voices";
+    const expectedTool = mcpId === "agnes" ? "image_21_flash" : mcpId === "cc-mcp" ? "delegate_coding_task" : "list_voices";
     if (!tools.includes(expectedTool)) {
       throw new Error(`MCP started, but ${expectedTool} was not registered.`);
     }
@@ -105,7 +106,14 @@ export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge",
       tools,
     };
 
-    if (mcpId === "agnes") {
+    if (mcpId === "cc-mcp") {
+      const ccStatus = parseTextContent(await client.callTool({
+        name: "claude_code_status",
+        arguments: {},
+      }, undefined, { timeout: 10000 }));
+      result.ccStatus = ccStatus;
+      result.ok = !probeFailed(ccStatus);
+    } else if (mcpId === "agnes") {
       result.imageProbe = { ok: true, tool: "image_21_flash", note: "Tool schema is registered." };
     } else {
       const voiceProbe = parseTextContent(await client.callTool({
@@ -117,7 +125,9 @@ export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge",
     }
 
     if (mode === "api") {
-      const apiProbe = mcpId === "agnes"
+      const apiProbe = mcpId === "cc-mcp"
+        ? result.ccStatus
+        : mcpId === "agnes"
         ? parseTextContent(await client.callTool({
           name: "image_21_flash",
           arguments: {

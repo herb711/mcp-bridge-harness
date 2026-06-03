@@ -14,6 +14,8 @@ import { ArtifactStore } from "./artifacts.js";
 import { loadAgnesConfig } from "./agnesConfig.js";
 import { AgnesHttpClient } from "./agnesHttp.js";
 import { AGNES_TOOLS } from "./agnesToolSchemas.js";
+import { claudeCodeStatus, delegateToClaudeCode, readOpenRedouTask, sendMessageToOpenRedou } from "./ccBridge.js";
+import { CC_CALLBACK_TOOLS, CC_TOOLS } from "./ccToolSchemas.js";
 import { loadConfig } from "./config.js";
 import { errorToJson } from "./errors.js";
 import { MiniMaxHttpClient } from "./minimaxHttp.js";
@@ -25,7 +27,7 @@ import { getAgentManifest } from "./manifest.js";
 import { applyProfileToProcessEnv } from "./harness/state.js";
 import { installHarness, startHarnessServer } from "./harness/server.js";
 
-const BUNDLED_MCP_IDS = new Set(["minimax-bridge", "agnes"]);
+const BUNDLED_MCP_IDS = new Set(["minimax-bridge", "agnes", "cc-mcp", "cc-mcp-callback"]);
 
 function argValue(argv: string[], name: string, fallback?: string): string | undefined {
   const eqPrefix = `${name}=`;
@@ -67,6 +69,12 @@ Usage:
   mcp-harness mcp agnes [--profile default]
       Run the bundled Agnes MCP over stdio.
 
+  mcp-harness mcp cc-mcp [--profile default]
+      Run the bundled CC MCP bridge for OpenRedou/OpenCode to delegate work to Claude Code.
+
+  mcp-harness mcp cc-mcp-callback [--profile default]
+      Run the temporary CC MCP callback server used by Claude Code sessions.
+
   mcp-harness --manifest
       Print Redou/Harness style MCP manifest.
 
@@ -79,7 +87,10 @@ Backward compatibility:
 }
 
 function toolsForMcp(mcpId: string) {
-  return mcpId === "agnes" ? AGNES_TOOLS : TOOLS;
+  if (mcpId === "agnes") return AGNES_TOOLS;
+  if (mcpId === "cc-mcp") return CC_TOOLS;
+  if (mcpId === "cc-mcp-callback") return CC_CALLBACK_TOOLS;
+  return TOOLS;
 }
 
 async function launchDesktopApp(): Promise<void> {
@@ -112,9 +123,17 @@ async function launchDesktopApp(): Promise<void> {
   });
 }
 
-async function runMcpServer(mcpId = "minimax-bridge"): Promise<void> {
+async function runMcpServer(mcpId = "minimax-bridge", profileId = "default"): Promise<void> {
   if (mcpId === "agnes") {
     await runAgnesMcpServer();
+    return;
+  }
+  if (mcpId === "cc-mcp") {
+    await runCcMcpServer(profileId);
+    return;
+  }
+  if (mcpId === "cc-mcp-callback") {
+    await runCcCallbackMcpServer();
     return;
   }
 
@@ -212,6 +231,71 @@ async function runMcpServer(mcpId = "minimax-bridge"): Promise<void> {
   await server.connect(transport);
 }
 
+async function runCcMcpServer(profileId = "default"): Promise<void> {
+  const server = new Server(
+    { name: "cc-mcp", version: "0.1.0-harness.1" },
+    { capabilities: { tools: {} } },
+  );
+
+  async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+    switch (name) {
+      case "delegate_coding_task":
+      case "delegate_to_claude_code":
+        return delegateToClaudeCode(args, profileId);
+      case "claude_code_status":
+        return claudeCodeStatus();
+      default:
+        throw new Error(`Unknown CC MCP tool: ${name}`);
+    }
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CC_TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      const result = await dispatchTool(request.params.name, request.params.arguments ?? {});
+      return isCallToolResult(result) ? result : toCallToolResult(request.params.name, result);
+    } catch (error) {
+      return toCallToolResult(request.params.name, errorToJson(error), true);
+    }
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+async function runCcCallbackMcpServer(): Promise<void> {
+  const server = new Server(
+    { name: "cc-mcp-callback", version: "0.1.0-harness.1" },
+    { capabilities: { tools: {} } },
+  );
+
+  async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+    switch (name) {
+      case "send_message_to_openredou":
+        return sendMessageToOpenRedou(args);
+      case "read_openredou_task":
+        return readOpenRedouTask(args);
+      default:
+        throw new Error(`Unknown CC MCP callback tool: ${name}`);
+    }
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CC_CALLBACK_TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      const result = await dispatchTool(request.params.name, request.params.arguments ?? {});
+      return isCallToolResult(result) ? result : toCallToolResult(request.params.name, result);
+    } catch (error) {
+      return toCallToolResult(request.params.name, errorToJson(error), true);
+    }
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
 async function runAgnesMcpServer(): Promise<void> {
   const config = loadAgnesConfig();
   const store = new ArtifactStore(config.basePath);
@@ -297,8 +381,8 @@ async function main(): Promise<void> {
     const mcpId = argv[1] || "minimax-bridge";
     const profileId = argValue(argv, "--profile", "default") || "default";
     if (!BUNDLED_MCP_IDS.has(mcpId)) throw new Error(`Unknown bundled MCP: ${mcpId}`);
-    await applyProfileToProcessEnv(mcpId, profileId);
-    await runMcpServer(mcpId);
+    await applyProfileToProcessEnv(mcpId === "cc-mcp-callback" ? "cc-mcp" : mcpId, profileId);
+    await runMcpServer(mcpId, profileId);
     return;
   }
 

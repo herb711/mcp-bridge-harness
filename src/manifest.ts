@@ -1,22 +1,24 @@
 import { TOOLS } from "./toolSchemas.js";
+import { CC_TOOLS } from "./ccToolSchemas.js";
 import { isSea } from "node:sea";
 
-function transportCommand() {
+function transportCommand(mcpId = "minimax-bridge") {
   if (isSea()) {
     return {
       command: process.execPath,
-      args: ["mcp", "minimax-bridge", "--profile", "default"],
+      args: ["mcp", mcpId, "--profile", "default"],
     };
   }
 
   return {
     command: "node",
-    args: ["${installDir}/dist/index.js", "mcp", "minimax-bridge", "--profile", "default"],
+    args: ["${installDir}/dist/index.js", "mcp", mcpId, "--profile", "default"],
   };
 }
 
 export function getAgentManifest() {
-  const command = transportCommand();
+  const command = transportCommand("minimax-bridge");
+  const ccCommand = transportCommand("cc-mcp");
 
   return {
     schemaVersion: "redou.agent.mcp.manifest/v1",
@@ -51,6 +53,22 @@ export function getAgentManifest() {
       },
       supportedTargets: ["opencode"],
       reservedTargets: ["codex", "claude-code", "cursor", "vscode"],
+      bundledMcp: [
+        {
+          id: "minimax-bridge",
+          displayName: "MiniMax Bridge MCP",
+          command: [command.command, ...command.args],
+          supportedHarnesses: ["opencode"],
+          tools: TOOLS.map((tool) => tool.name),
+        },
+        {
+          id: "cc-mcp",
+          displayName: "CC MCP",
+          command: [ccCommand.command, ...ccCommand.args],
+          supportedHarnesses: ["opencode", "claude-code"],
+          tools: CC_TOOLS.map((tool) => tool.name),
+        },
+      ],
     },
     capabilities: {
       tools: TOOLS.map((tool) => ({
