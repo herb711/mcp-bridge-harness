@@ -28,10 +28,6 @@ jobs:
             os: windows-latest
             target: win
             arch: x64
-          - label: macos-x64
-            os: macos-13
-            target: mac
-            arch: x64
           - label: macos-arm64
             os: macos-latest
             target: mac
