@@ -1,0 +1,103 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override package version (leave blank to use package.json)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            os: windows-latest
+            target: win
+            arch: x64
+          - label: macos-arm64
+            os: macos-latest
+            target: mac
+            arch: arm64
+          - label: linux-x64
+            os: ubuntu-latest
+            target: linux
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump version (optional)
+        if: ${{ inputs.version != '' }}
+        shell: bash
+        run: |
+          node -e "
+            const fs=require('fs');
+            const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+            p.version='${{ inputs.version }}';
+            fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          "
+          echo "version=${{ inputs.version }}"
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Generate agent manifest
+        run: node scripts/generate-agent-manifest.mjs
+
+      - name: Build Electron desktop app (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npx --no-install electron-builder --win --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ''
+
+      - name: Build Electron desktop app (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: npx --no-install electron-builder --mac --${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Build Electron desktop app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npx --no-install electron-builder --linux --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: List build output
+        shell: bash
+        run: |
+          echo "--- release/desktop ---"
+          ls -la release/desktop/ 2>/dev/null || true
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-harness-${{ matrix.label }}
+          path: |
+            release/desktop/*.exe
+            release/desktop/*.dmg
+            release/desktop/*.AppImage
+            release/desktop/*.zip
+            release/desktop/*.blockmap
+            release/desktop/latest-mac.yml
+            release/desktop/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 14
