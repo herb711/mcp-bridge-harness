@@ -9,20 +9,21 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   type CallToolResult,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ArtifactStore } from "./artifacts.js";
 import { loadAgnesConfig } from "./agnesConfig.js";
 import { AgnesHttpClient } from "./agnesHttp.js";
 import { AGNES_TOOLS } from "./agnesToolSchemas.js";
-import { claudeCodeStatus, delegateToClaudeCode, readOpenRedouTask, sendMessageToOpenRedou } from "./ccBridge.js";
-import { CC_CALLBACK_TOOLS, CC_TOOLS } from "./ccToolSchemas.js";
+import { cancelClaudeCodeSession, claudeCodeStatus, delegateToClaudeCode, getClaudeCodeSessionResult, readHarnessTask, sendMessageToHarness, startClaudeCodeTask, tailClaudeCodeSession, workspaceAppendFile, workspaceFinalizeFile, workspaceRunCommand, type CcPermissionDecision, type CcPermissionRequest, type CcRunHooks, type CcRuntimeEvent } from "./ccBridge.js";
+import { CC_CALLBACK_TOOLS, ccToolsFromEnv } from "./ccToolSchemas.js";
 import { loadConfig } from "./config.js";
 import { errorToJson } from "./errors.js";
 import { MiniMaxHttpClient } from "./minimaxHttp.js";
 import { enhanceImageToolResult, isCallToolResult, toCallToolResult } from "./mcpResults.js";
 import { OfficialMiniMaxProxy } from "./officialMiniMaxProxy.js";
 import { TokenPlanProxy } from "./tokenPlanProxy.js";
-import { TOOLS } from "./toolSchemas.js";
+import { EXTENDED_MINIMAX_TOOL_NAME_SET, EXTENDED_TOOLS, LEGACY_MINIMAX_TOOLS, OFFICIAL_MINIMAX_TOOL_NAME_SET, TOOLS } from "./toolSchemas.js";
 import { getAgentManifest } from "./manifest.js";
 import { applyProfileToProcessEnv } from "./harness/state.js";
 import { installHarness, startHarnessServer } from "./harness/server.js";
@@ -70,7 +71,7 @@ Usage:
       Run the bundled Agnes MCP over stdio.
 
   mcp-harness mcp cc-mcp [--profile default]
-      Run the bundled CC MCP bridge for OpenRedou/OpenCode to delegate work to Claude Code.
+      Run the bundled CC MCP bridge for the main harness to delegate work to Claude Code.
 
   mcp-harness mcp cc-mcp-callback [--profile default]
       Run the temporary CC MCP callback server used by Claude Code sessions.
@@ -88,9 +89,121 @@ Backward compatibility:
 
 function toolsForMcp(mcpId: string) {
   if (mcpId === "agnes") return AGNES_TOOLS;
-  if (mcpId === "cc-mcp") return CC_TOOLS;
+  if (mcpId === "cc-mcp") return ccToolsFromEnv(process.env);
   if (mcpId === "cc-mcp-callback") return CC_CALLBACK_TOOLS;
   return TOOLS;
+}
+
+function clipForNotification(value: string, max = 1200): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.floor(max / 2))}\n...\n${value.slice(value.length - Math.floor(max / 2))}`;
+}
+
+function mainHarnessLooksFullyAuthorized(): boolean {
+  const values = [
+    process.env.CC_MCP_MAIN_HARNESS_PERMISSION,
+    process.env.MCP_HARNESS_MAIN_PERMISSION,
+    process.env.MCP_HARNESS_PERMISSION_MODE,
+    process.env.CODEX_SANDBOX_MODE,
+    process.env.SANDBOX_MODE,
+  ]
+    .map((item) => item?.trim().toLowerCase())
+    .filter(Boolean);
+  return values.some((item) => /^(full|auto|auto-approve|danger-full-access|unrestricted|no-sandbox)$/.test(item || ""));
+}
+
+function ccEventMessage(event: CcRuntimeEvent): string {
+  const prefix = event.kind === "permission" ? "Claude Code permission" : `Claude Code ${event.stream}`;
+  return `${prefix}: ${clipForNotification(event.text, 900)}`;
+}
+
+function createCcRunHooks(server: Server, extra: { _meta?: { progressToken?: string | number }; sessionId?: string; sendNotification?: (notification: any) => Promise<void> }): CcRunHooks {
+  const progressToken = extra._meta?.progressToken;
+  return {
+    async onEvent(event) {
+      const message = ccEventMessage(event);
+      if (progressToken != null && extra.sendNotification) {
+        await extra.sendNotification({
+          method: "notifications/progress",
+          params: {
+            progressToken,
+            progress: event.sequence,
+            message,
+          },
+        }).catch(() => undefined);
+      }
+      await server.sendLoggingMessage({
+        level: event.kind === "permission" ? "warning" : "info",
+        logger: "cc-mcp",
+        data: {
+          sessionId: event.sessionId,
+          stream: event.stream,
+          kind: event.kind,
+          sequence: event.sequence,
+          text: clipForNotification(event.text),
+          metadata: event.metadata,
+        },
+      }, extra.sessionId).catch(() => undefined);
+    },
+    async authorizePermission(request): Promise<CcPermissionDecision> {
+      if (mainHarnessLooksFullyAuthorized()) {
+        return {
+          approved: true,
+          source: "main_harness_full",
+          reason: "Main harness environment indicates full permission.",
+          responseText: process.env.CC_CLAUDE_PERMISSION_APPROVE_INPUT || "y\n",
+        };
+      }
+
+      const capabilities = server.getClientCapabilities();
+      if (!capabilities?.elicitation?.form) {
+        return {
+          approved: true,
+          source: "fallback",
+          reason: "Main harness does not advertise MCP form elicitation support; cc-mcp auto-approved to avoid silent Write/Edit denial.",
+          responseText: process.env.CC_CLAUDE_PERMISSION_APPROVE_INPUT || "y\n",
+        };
+      }
+
+      const result = await server.elicitInput({
+        mode: "form",
+        message: [
+          "Claude Code is requesting permission during delegated execution.",
+          "",
+          clipForNotification(request.prompt, 3000),
+        ].join("\n"),
+        requestedSchema: {
+          type: "object",
+          properties: {
+            decision: {
+              type: "string",
+              title: "Decision",
+              enum: ["allow", "deny"],
+              enumNames: ["Allow once", "Deny"],
+              default: "deny",
+            },
+            reason: {
+              type: "string",
+              title: "Reason",
+              description: "Optional note for the permission decision.",
+            },
+          },
+          required: ["decision"],
+        },
+      }, { timeout: Number(process.env.CC_MCP_PERMISSION_REQUEST_TIMEOUT_MS || 120000) });
+
+      const content = result.content || {};
+      const approved = result.action === "accept" && content.decision === "allow";
+      return {
+        approved,
+        source: "main_harness_elicitation",
+        reason: typeof content.reason === "string" && content.reason ? content.reason : `Elicitation action: ${result.action}`,
+        responseText: approved
+          ? process.env.CC_CLAUDE_PERMISSION_APPROVE_INPUT || "y\n"
+          : process.env.CC_CLAUDE_PERMISSION_DENY_INPUT || "n\n",
+      };
+    },
+  };
 }
 
 async function launchDesktopApp(): Promise<void> {
@@ -148,38 +261,80 @@ async function runMcpServer(mcpId = "minimax-bridge", profileId = "default"): Pr
     { capabilities: { tools: {} } },
   );
 
-  async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+  function mergeTools(primary: Tool[], secondary: Tool[]): Tool[] {
+    const seen = new Set<string>();
+    const merged: Tool[] = [];
+    for (const tool of [...primary, ...secondary]) {
+      if (seen.has(tool.name)) continue;
+      seen.add(tool.name);
+      merged.push(tool);
+    }
+    return merged;
+  }
+
+  async function officialToolsOrFallback(): Promise<Tool[]> {
+    if (!officialMiniMax.enabled) return [];
+    try {
+      return await officialMiniMax.listTools();
+    } catch {
+      return TOOLS.filter((tool) => OFFICIAL_MINIMAX_TOOL_NAME_SET.has(tool.name));
+    }
+  }
+
+  async function bridgeTools(): Promise<Tool[]> {
+    if (!officialMiniMax.enabled) return LEGACY_MINIMAX_TOOLS;
+    const officialTools = await officialToolsOrFallback();
+    return config.enableExtendedTools
+      ? mergeTools(officialTools, EXTENDED_TOOLS)
+      : officialTools;
+  }
+
+  async function officialToolNames(): Promise<Set<string>> {
+    if (!officialMiniMax.enabled) return new Set();
+    return new Set((await officialToolsOrFallback()).map((tool) => tool.name));
+  }
+
+  async function dispatchExtendedTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
     switch (name) {
-      // Token Plan branch. These two tools are proxied to MiniMax's Token Plan MCP.
       case "web_search":
         return tokenPlan.callTool("web_search", args);
       case "understand_image":
         return tokenPlan.callTool("understand_image", args);
+      case "query_text_to_audio":
+        return minimax.queryTextToAudio(args);
+      case "video_template_generation":
+        return minimax.videoTemplateGeneration(args);
+      case "query_video_template_generation":
+        return minimax.queryVideoTemplateGeneration(args);
+      case "lyrics_generation":
+        return minimax.lyricsGeneration(args);
+      case "music_cover_preprocess":
+        return minimax.musicCoverPreprocess(args);
+      default:
+        throw new Error(`Unknown MiniMax extended tool: ${name}`);
+    }
+  }
 
-      // Official MiniMax MCP branch first where its tool surface matches our request.
-      // Extended or unsupported requests fall through to our HTTP/WebSocket implementation.
+  async function dispatchLegacyTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+    switch (name) {
+      case "web_search":
+        return tokenPlan.callTool("web_search", args);
+      case "understand_image":
+        return tokenPlan.callTool("understand_image", args);
       case "text_to_audio":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.textToAudio(args);
       case "query_text_to_audio":
         return minimax.queryTextToAudio(args);
       case "list_voices":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.listVoices(args);
       case "voice_clone":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.voiceClone(args);
       case "text_to_image":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.textToImage(args);
       case "generate_video":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
-        return minimax.generateVideo(args);
       case "image_to_video":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.generateVideo(args);
       case "query_video_generation":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.queryVideoGeneration(args);
       case "video_template_generation":
         return minimax.videoTemplateGeneration(args);
@@ -188,16 +343,30 @@ async function runMcpServer(mcpId = "minimax-bridge", profileId = "default"): Pr
       case "lyrics_generation":
         return minimax.lyricsGeneration(args);
       case "music_generation":
-        if (officialMiniMax.canHandle(name, args)) return officialMiniMax.callTool(name, args);
         return minimax.musicGeneration(args);
       case "music_cover_preprocess":
         return minimax.musicCoverPreprocess(args);
       default:
-        throw new Error(`Unknown tool: ${name}`);
+        throw new Error(`Unknown legacy MiniMax tool: ${name}`);
     }
   }
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+    const officialNames = await officialToolNames();
+    if (officialNames.has(name)) {
+      return officialMiniMax.callTool(name, args);
+    }
+
+    if (config.enableExtendedTools && EXTENDED_MINIMAX_TOOL_NAME_SET.has(name)) {
+      return dispatchExtendedTool(name, args);
+    }
+
+    if (!officialMiniMax.enabled) return dispatchLegacyTool(name, args);
+
+    throw new Error(`Unknown tool: ${name}`);
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await bridgeTools() }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
@@ -232,31 +401,93 @@ async function runMcpServer(mcpId = "minimax-bridge", profileId = "default"): Pr
 }
 
 async function runCcMcpServer(profileId = "default"): Promise<void> {
+  const tools = ccToolsFromEnv(process.env);
   const server = new Server(
     { name: "cc-mcp", version: "0.1.0-harness.1" },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, logging: {} } },
   );
 
-  async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
+  function delegateAction(args: unknown): string {
+    const record = args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : {};
+    const action = typeof record.action === "string" ? record.action.trim().toLowerCase() : "";
+    return action || "task";
+  }
+
+  function isTaskDelegationCall(name: string, args: unknown): boolean {
+    if (name === "delegate_coding_task" || name === "delegate_to_claude_code") return true;
+    return name === "delegate" && ["", "task", "delegate", "run_task", "start"].includes(delegateAction(args));
+  }
+
+  async function dispatchDelegate(args: unknown, hooks: CcRunHooks): Promise<unknown | CallToolResult> {
+    switch (delegateAction(args)) {
+      case "task":
+      case "delegate":
+      case "run_task":
+        return delegateToClaudeCode(args, profileId, hooks);
+      case "start":
+        return startClaudeCodeTask(args, profileId, hooks);
+      case "tail":
+        return tailClaudeCodeSession(args);
+      case "result":
+        return getClaudeCodeSessionResult(args);
+      case "cancel":
+        return cancelClaudeCodeSession(args);
+      case "status":
+        return claudeCodeStatus();
+      case "append_file":
+        return workspaceAppendFile(args);
+      case "finalize_file":
+        return workspaceFinalizeFile(args);
+      case "run_command":
+        return workspaceRunCommand(args);
+      default:
+        throw new Error(`Unknown delegate action: ${delegateAction(args)}`);
+    }
+  }
+
+  async function dispatchTool(name: string, args: unknown, hooks: CcRunHooks = {}): Promise<unknown | CallToolResult> {
     switch (name) {
+      case "delegate":
+        return dispatchDelegate(args, hooks);
       case "delegate_coding_task":
       case "delegate_to_claude_code":
-        return delegateToClaudeCode(args, profileId);
+        return delegateToClaudeCode(args, profileId, hooks);
       case "claude_code_status":
         return claudeCodeStatus();
+      case "workspace_append_file":
+        return workspaceAppendFile(args);
+      case "workspace_finalize_file":
+        return workspaceFinalizeFile(args);
+      case "workspace_run_command":
+        return workspaceRunCommand(args);
       default:
         throw new Error(`Unknown CC MCP tool: ${name}`);
     }
   }
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CC_TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     try {
-      const result = await dispatchTool(request.params.name, request.params.arguments ?? {});
-      return isCallToolResult(result) ? result : toCallToolResult(request.params.name, result);
+      const isTask = isTaskDelegationCall(request.params.name, request.params.arguments ?? {});
+      const hooks = isTask
+        ? createCcRunHooks(server, extra)
+        : {};
+      const result = await dispatchTool(request.params.name, request.params.arguments ?? {}, hooks);
+      if (isCallToolResult(result)) return result;
+      const callToolResult = await toCallToolResult(request.params.name, result);
+      if (isTask) {
+        const textBlock = callToolResult.content.find((c): c is { type: "text"; text: string } => c.type === "text");
+        if (textBlock) textBlock.text = `Claude Code:\n${textBlock.text}`;
+      }
+      return callToolResult;
     } catch (error) {
-      return toCallToolResult(request.params.name, errorToJson(error), true);
+      const callToolResult = await toCallToolResult(request.params.name, errorToJson(error), true);
+      if (isTaskDelegationCall(request.params.name, request.params.arguments ?? {})) {
+        const textBlock = callToolResult.content.find((c): c is { type: "text"; text: string } => c.type === "text");
+        if (textBlock) textBlock.text = `Claude Code:\n${textBlock.text}`;
+      }
+      return callToolResult;
     }
   });
 
@@ -272,10 +503,10 @@ async function runCcCallbackMcpServer(): Promise<void> {
 
   async function dispatchTool(name: string, args: unknown): Promise<unknown | CallToolResult> {
     switch (name) {
-      case "send_message_to_openredou":
-        return sendMessageToOpenRedou(args);
-      case "read_openredou_task":
-        return readOpenRedouTask(args);
+      case "send_message_to_harness":
+        return sendMessageToHarness(args);
+      case "read_harness_task":
+        return readHarnessTask(args);
       default:
         throw new Error(`Unknown CC MCP callback tool: ${name}`);
     }

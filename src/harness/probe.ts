@@ -73,7 +73,7 @@ async function closeQuietly(client: Client | undefined, transport: StdioClientTr
 }
 
 export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge", profileId = "default"): Promise<ProbeResult> {
-  const entry = buildOpenCodeMcpEntry(mcpId, profileId, true);
+  const entry = await buildOpenCodeMcpEntry(mcpId, profileId, true);
   const [command, ...args] = entry.command;
   let client: Client | undefined;
   let transport: StdioClientTransport | undefined;
@@ -93,7 +93,7 @@ export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge",
     await client.connect(transport);
     const listed = await client.listTools(undefined, { timeout: 15000 });
     const tools = listed.tools.map((tool) => tool.name).sort();
-    const expectedTool = mcpId === "agnes" ? "image_21_flash" : mcpId === "cc-mcp" ? "delegate_coding_task" : "list_voices";
+    const expectedTool = mcpId === "agnes" ? "image_21_flash" : mcpId === "cc-mcp" ? "delegate" : "list_voices";
     if (!tools.includes(expectedTool)) {
       throw new Error(`MCP started, but ${expectedTool} was not registered.`);
     }
@@ -108,8 +108,8 @@ export async function probeBundledMcp(mode: ProbeMode, mcpId = "minimax-bridge",
 
     if (mcpId === "cc-mcp") {
       const ccStatus = parseTextContent(await client.callTool({
-        name: "claude_code_status",
-        arguments: {},
+        name: "delegate",
+        arguments: { action: "status" },
       }, undefined, { timeout: 10000 }));
       result.ccStatus = ccStatus;
       result.ok = !probeFailed(ccStatus);

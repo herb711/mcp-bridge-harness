@@ -14,7 +14,7 @@
         <div class="brand-mark">H</div>
         <div>
           <strong>MCP Harness</strong>
-          <span>Local MCP Manager</span>
+          <span>本地 MCP 管理器</span>
         </div>
       </div>
       <nav>
@@ -23,8 +23,8 @@
         <button class="nav" data-page="harnesses">Harness 目标</button>
       </nav>
       <div class="side-note">
-        <strong>v0.2</strong>
-        <span>内置 MiniMax Bridge 与 Agnes MCP。保存 profile 后可同步到 Harness 目标里的 OpenCode。</span>
+        <strong id="sidebarVersion">v…</strong>
+          <span id="sidebarDescription">本地 MCP 管理器：内置 MiniMax Bridge、Agnes 与 CC MCP，可一键同步到 OpenCode、Hermes、Codex 与 Claude Code。</span>
       </div>
     </aside>
 
@@ -59,9 +59,9 @@
             </div>
             <div class="update-details" id="updateDetails"></div>
             <div class="actions">
-              <button type="button" class="secondary" id="checkUpdateBtn">检查更新</button>
-              <button type="button" class="primary hidden" id="downloadUpdateBtn">更新</button>
-              <button type="button" class="ghost" id="openReleaseBtn">打开发布页</button>
+              <button type="button" class="primary" id="checkUpdateBtn">检查更新</button>
+              <button type="button" class="secondary hidden" id="downloadUpdateBtn">立即更新</button>
+              <button type="button" class="ghost" id="openReleaseBtn">打开最新发布页</button>
             </div>
           </article>
         </div>
@@ -70,7 +70,7 @@
       <section class="page hidden" id="configure">
         <div class="breadcrumb-row">
           <button type="button" class="ghost" id="backToHarnessesBtn">返回 Harness 目标</button>
-          <span class="muted">OpenCode Adapter</span>
+          <span class="muted" id="harnessAdapterLabel">OpenCode Adapter</span>
         </div>
         <div class="grid two wide-left">
           <article class="card">
@@ -79,16 +79,31 @@
                 <span>选择 MCP</span>
                 <select id="mcpSelect"></select>
               </label>
-              <span class="badge ok" id="selectedMcpName">MiniMax Bridge MCP</span>
+              <div class="mcp-state-badges">
+                <span class="badge ok" id="selectedMcpName">MiniMax Bridge MCP</span>
+                <span class="badge warn" id="selectedMcpBindingState">未写入 OpenCode</span>
+              </div>
             </div>
 
             <h2 id="configTitle">配置 OpenCode 使用 MiniMax Bridge MCP</h2>
-            <p class="muted" id="configDescription">API Key 会保存到本机 Harness secrets 文件，不写入 OpenCode 配置。</p>
+            <p class="muted" id="configDescription">API Key 会保存到本机 Harness 秘钥文件，不写入 OpenCode 配置。</p>
 
             <form id="mcpProfileForm" class="form">
-              <div id="mcpFields" class="form-fields"></div>
-              <div class="actions">
-                <button type="button" id="saveProfileBtn" class="secondary">仅保存 Profile</button>
+              <div id="mcpFields" class="form-fields">
+                <div id="mcpCoreFields" class="form-fields"></div>
+                <details id="mcpAdvancedBlock" class="advanced-block hidden">
+                  <summary>
+                    <span>高级设置</span>
+                    <em class="advanced-hint">SSH key、install 路径、副 Harness runtime 调优。默认即可，仅在需要时展开。</em>
+                  </summary>
+                  <div id="mcpAdvancedFields" class="form-fields advanced-fields"></div>
+                </details>
+              </div>
+              <div class="actions configure-actions">
+                <button type="submit" id="configureMcpBtn" class="primary">配置</button>
+                <button type="button" id="saveProfileBtn" class="secondary">仅保存配置</button>
+                <button type="button" id="detectClaudeBtn" class="secondary hidden">检测 Claude Code</button>
+                <button type="button" id="setupRemoteCcBtn" class="secondary hidden">配置远程服务器</button>
                 <button type="button" id="testStartupBtn" class="secondary">测试 MCP 启动</button>
                 <button type="button" id="testApiBtn" class="secondary">测试 API</button>
                 <button type="submit" id="applyOpenCodeBtn" class="primary">保存并配置到 OpenCode</button>
@@ -102,8 +117,8 @@
           </article>
 
           <article class="card">
-            <h2>OpenCode 预览</h2>
-            <p class="muted">MCP Harness 会合并写入所选 MCP，不覆盖其他 MCP。修改前会自动备份。</p>
+            <h2 id="harnessPreviewTitle">OpenCode 预览</h2>
+            <p class="muted" id="harnessPreviewDescription">MCP Harness 会合并写入所选 MCP，不覆盖其他 MCP。修改前会自动备份。</p>
             <pre id="opencodePreview" class="code"></pre>
           </article>
         </div>

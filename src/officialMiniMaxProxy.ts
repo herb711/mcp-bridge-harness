@@ -1,29 +1,8 @@
-import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "./config.js";
 import { UserInputError } from "./errors.js";
-
-type OfficialToolName =
-  | "text_to_audio"
-  | "list_voices"
-  | "voice_clone"
-  | "text_to_image"
-  | "generate_video"
-  | "image_to_video"
-  | "query_video_generation"
-  | "music_generation";
-
-const OFFICIAL_VIDEO_MODELS = new Set([
-  "T2V-01",
-  "T2V-01-Director",
-  "I2V-01",
-  "I2V-01-Director",
-  "I2V-01-live",
-  "S2V-01",
-  "MiniMax-Hailuo-02",
-]);
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -31,19 +10,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function getString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function getBoolean(value: unknown): boolean {
-  return value === true || value === "true";
-}
-
-function hasAny(input: Record<string, unknown>, keys: string[]): boolean {
-  return keys.some((key) => input[key] != null && input[key] !== "");
-}
-
-function hasAbsoluteOutputDirectory(input: Record<string, unknown>): boolean {
-  const outputDirectory = getString(input.output_directory) || getString(input.outputDirectory);
-  return Boolean(outputDirectory && path.isAbsolute(outputDirectory));
 }
 
 function mapKeys(input: Record<string, unknown>, mapping: Record<string, string>): Record<string, unknown> {
@@ -58,13 +24,12 @@ function mapKeys(input: Record<string, unknown>, mapping: Record<string, string>
 function normalizeTextToAudioArgs(input: Record<string, unknown>): Record<string, unknown> {
   const output = mapKeys(input, {
     output_directory: "outputDirectory",
+    output_file: "outputFile",
     voice_id: "voiceId",
     sample_rate: "sampleRate",
     language_boost: "languageBoost",
     subtitle_enable: "subtitleEnable",
-    output_file: "outputFile",
   });
-  delete output.async_mode;
   delete output.poll_interval_seconds;
   delete output.max_wait_seconds;
   delete output.transport;
@@ -75,11 +40,22 @@ function normalizeListVoicesArgs(input: Record<string, unknown>): Record<string,
   return mapKeys(input, { voice_type: "voiceType" });
 }
 
+function normalizePlayAudioArgs(input: Record<string, unknown>): Record<string, unknown> {
+  return mapKeys(input, {
+    input_file_path: "inputFilePath",
+    input_file: "inputFilePath",
+    file: "inputFilePath",
+    is_url: "isUrl",
+  });
+}
+
 function normalizeVoiceCloneArgs(input: Record<string, unknown>): Record<string, unknown> {
   return mapKeys(input, {
     voice_id: "voiceId",
     file: "audioFile",
+    audio_file: "audioFile",
     output_directory: "outputDirectory",
+    output_file: "outputFile",
     is_url: "isUrl",
   });
 }
@@ -88,6 +64,7 @@ function normalizeTextToImageArgs(input: Record<string, unknown>): Record<string
   return mapKeys(input, {
     aspect_ratio: "aspectRatio",
     prompt_optimizer: "promptOptimizer",
+    subject_reference: "subjectReference",
     output_directory: "outputDirectory",
     output_file: "outputFile",
   });
@@ -106,6 +83,7 @@ function normalizeQueryVideoArgs(input: Record<string, unknown>): Record<string,
   return mapKeys(input, {
     task_id: "taskId",
     output_directory: "outputDirectory",
+    output_file: "outputFile",
   });
 }
 
@@ -113,75 +91,35 @@ function normalizeMusicArgs(input: Record<string, unknown>): Record<string, unkn
   return mapKeys(input, {
     sample_rate: "sampleRate",
     output_directory: "outputDirectory",
+    output_file: "outputFile",
   });
 }
 
-function canUseOfficialTool(name: string, input: Record<string, unknown>): name is OfficialToolName {
-  if (hasAbsoluteOutputDirectory(input)) return false;
-
-  switch (name) {
-    case "list_voices":
-      return !hasAny(input, ["language", "query", "limit"]);
-
-    case "text_to_audio":
-      return !getBoolean(input.async_mode)
-        && !hasAny(input, [
-          "transport",
-          "poll_interval_seconds",
-          "max_wait_seconds",
-          "pronunciation_dict",
-          "voice_modify",
-        ]);
-
-    case "voice_clone":
-      return !hasAny(input, ["prompt_audio", "prompt_is_url", "prompt_text", "model"]);
-
-    case "text_to_image": {
-      const model = getString(input.model);
-      return !hasAny(input, ["subject_reference"]) && (!model || model === "image-01");
-    }
-
-    case "generate_video": {
-      const model = getString(input.model);
-      return Boolean(getString(input.prompt))
-        && !hasAny(input, ["last_frame_image", "subject_reference", "poll_interval_seconds", "max_wait_seconds"])
-        && (!model || OFFICIAL_VIDEO_MODELS.has(model));
-    }
-
-    case "image_to_video": {
-      const model = getString(input.model);
-      return Boolean(getString(input.first_frame_image) || getString(input.firstFrameImage))
-        && !hasAny(input, ["duration", "resolution"])
-        && (!model || OFFICIAL_VIDEO_MODELS.has(model));
-    }
-
-    case "query_video_generation":
-      return !hasAny(input, ["poll_until_done", "poll_interval_seconds", "max_wait_seconds"]);
-
-    case "music_generation":
-      return Boolean(getString(input.lyrics))
-        && !hasAny(input, [
-          "model",
-          "lyrics_optimizer",
-          "is_instrumental",
-          "audio_url",
-          "audio_base64",
-          "cover_feature_id",
-          "output_format",
-        ]);
-
-    default:
-      return false;
-  }
+function normalizeVoiceDesignArgs(input: Record<string, unknown>): Record<string, unknown> {
+  return mapKeys(input, {
+    preview_text: "previewText",
+    voice_id: "voiceId",
+    output_directory: "outputDirectory",
+    output_file: "outputFile",
+  });
 }
 
-function normalizeOfficialArgs(name: OfficialToolName, args: unknown): Record<string, unknown> {
+function normalizeCommonArgs(input: Record<string, unknown>): Record<string, unknown> {
+  return mapKeys(input, {
+    output_directory: "outputDirectory",
+    output_file: "outputFile",
+  });
+}
+
+function normalizeOfficialArgs(name: string, args: unknown): Record<string, unknown> {
   const input = asRecord(args);
   switch (name) {
     case "text_to_audio":
       return normalizeTextToAudioArgs(input);
     case "list_voices":
       return normalizeListVoicesArgs(input);
+    case "play_audio":
+      return normalizePlayAudioArgs(input);
     case "voice_clone":
       return normalizeVoiceCloneArgs(input);
     case "text_to_image":
@@ -193,6 +131,10 @@ function normalizeOfficialArgs(name: OfficialToolName, args: unknown): Record<st
       return normalizeQueryVideoArgs(input);
     case "music_generation":
       return normalizeMusicArgs(input);
+    case "voice_design":
+      return normalizeVoiceDesignArgs(input);
+    default:
+      return normalizeCommonArgs(input);
   }
 }
 
@@ -200,16 +142,20 @@ export class OfficialMiniMaxProxy {
   private client?: Client;
   private transport?: StdioClientTransport;
   private connecting?: Promise<Client>;
+  private toolsCache?: Tool[];
 
   constructor(private readonly config: Config) {}
 
-  private apiKey(): string {
-    return this.config.apiKey || this.config.tokenPlanApiKey;
+  get enabled(): boolean {
+    return this.config.enableOfficialMcpProxy;
   }
 
-  canHandle(name: string, args: unknown): name is OfficialToolName {
-    if (!this.config.enableOfficialMcpProxy || !this.apiKey()) return false;
-    return canUseOfficialTool(name, asRecord(args));
+  hasCredentials(): boolean {
+    return Boolean(this.apiKey());
+  }
+
+  private apiKey(): string {
+    return this.config.apiKey || this.config.tokenPlanApiKey;
   }
 
   private async reset(): Promise<void> {
@@ -218,6 +164,7 @@ export class OfficialMiniMaxProxy {
     this.client = undefined;
     this.transport = undefined;
     this.connecting = undefined;
+    this.toolsCache = undefined;
 
     if (client) {
       await client.close().catch(() => undefined);
@@ -254,7 +201,7 @@ export class OfficialMiniMaxProxy {
       });
       const client = new Client({
         name: "minimax-bridge-official-proxy",
-        version: "0.1.0",
+        version: "0.2.0",
       });
       await client.connect(transport);
       this.transport = transport;
@@ -269,28 +216,37 @@ export class OfficialMiniMaxProxy {
     }
   }
 
-  async callTool(name: OfficialToolName, args: unknown): Promise<CallToolResult> {
-    const toolArgs = normalizeOfficialArgs(name, args);
-
+  private async withReconnect<T>(action: (client: Client) => Promise<T>): Promise<T> {
     try {
-      const client = await this.connect();
-      const result = await client.callTool({
-        name,
-        arguments: toolArgs,
-      }, undefined, { timeout: this.config.officialMcpTimeoutMs });
-      return result as CallToolResult;
+      return await action(await this.connect());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/not connected|disconnected|closed|transport/i.test(message)) throw error;
 
       await this.reset();
-      const client = await this.connect();
-      const result = await client.callTool({
-        name,
-        arguments: toolArgs,
-      }, undefined, { timeout: this.config.officialMcpTimeoutMs });
-      return result as CallToolResult;
+      return action(await this.connect());
     }
+  }
+
+  async listTools(): Promise<Tool[]> {
+    if (this.toolsCache) return this.toolsCache;
+    const listed = await this.withReconnect((client) => client.listTools(undefined, { timeout: this.config.officialMcpTimeoutMs }));
+    this.toolsCache = listed.tools;
+    return this.toolsCache;
+  }
+
+  async hasTool(name: string): Promise<boolean> {
+    if (!this.enabled || !getString(name)) return false;
+    return (await this.listTools()).some((tool) => tool.name === name);
+  }
+
+  async callTool(name: string, args: unknown): Promise<CallToolResult> {
+    const toolArgs = normalizeOfficialArgs(name, args);
+    const result = await this.withReconnect((client) => client.callTool({
+      name,
+      arguments: toolArgs,
+    }, undefined, { timeout: this.config.officialMcpTimeoutMs }));
+    return result as CallToolResult;
   }
 
   async close(): Promise<void> {

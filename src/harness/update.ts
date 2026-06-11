@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_REPO = "herb711/mcp-bridge-harness";
@@ -156,6 +158,53 @@ async function fetchJson<T>(url: string, headers: Record<string, string> = {}): 
     throw new Error(`Update check failed: ${response.status} ${response.statusText}`);
   }
   return await response.json() as T;
+}
+
+export interface StagedUpdateResult {
+  ok: boolean;
+  filePath?: string;
+  fileName?: string;
+  size?: number;
+  error?: string;
+}
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 200) || "mcp-harness-update.bin";
+}
+
+function inferFileNameFromUrl(url: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const last = pathname.split("/").filter(Boolean).pop() || "mcp-harness-update.bin";
+    return sanitizeFileName(last);
+  } catch {
+    return "mcp-harness-update.bin";
+  }
+}
+
+export async function stageUpdateAsset(assetUrl: string, preferredName?: string): Promise<StagedUpdateResult> {
+  if (!/^https?:\/\//i.test(assetUrl)) {
+    return { ok: false, error: "无效的更新包地址。" };
+  }
+  const fileName = sanitizeFileName(preferredName || inferFileNameFromUrl(assetUrl));
+  const tempRoot = path.join(os.tmpdir(), "mcp-harness-updates");
+  await fs.mkdir(tempRoot, { recursive: true });
+  const targetPath = path.join(tempRoot, fileName);
+  try {
+    const response = await fetch(assetUrl, {
+      redirect: "follow",
+      headers: { "user-agent": "mcp-harness-update-installer" },
+    });
+    if (!response.ok || !response.body) {
+      return { ok: false, error: `下载更新包失败：HTTP ${response.status} ${response.statusText}` };
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    await fs.writeFile(targetPath, Buffer.from(arrayBuffer));
+    const stats = await fs.stat(targetPath);
+    return { ok: true, filePath: targetPath, fileName, size: stats.size };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function platformAliases(): string[] {

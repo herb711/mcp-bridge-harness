@@ -16,6 +16,7 @@ export interface Config {
   tokenPlanCommand: string;
   tokenPlanArgs: string[];
   enableOfficialMcpProxy: boolean;
+  enableExtendedTools: boolean;
   officialMcpCommand: string;
   officialMcpArgs: string[];
   officialMcpTimeoutMs: number;
@@ -77,8 +78,9 @@ export function loadConfig(): Config {
     tokenPlanCommand: process.env.MINIMAX_PLAN_MCP_COMMAND || "uvx",
     tokenPlanArgs: parseArgs(process.env.MINIMAX_PLAN_MCP_ARGS, ["minimax-coding-plan-mcp", "-y"]),
     enableOfficialMcpProxy: boolFromEnv("MINIMAX_ENABLE_OFFICIAL_MCP_PROXY", true),
+    enableExtendedTools: boolFromEnv("MINIMAX_ENABLE_EXTENDED_TOOLS", true),
     officialMcpCommand: process.env.MINIMAX_OFFICIAL_MCP_COMMAND || "npx",
-    officialMcpArgs: parseArgs(process.env.MINIMAX_OFFICIAL_MCP_ARGS, ["-y", "minimax-mcp-js"]),
+    officialMcpArgs: parseArgs(process.env.MINIMAX_OFFICIAL_MCP_ARGS, ["-y", "minimax-mcp-js@0.0.17"]),
     officialMcpTimeoutMs: numberFromEnv("MINIMAX_OFFICIAL_MCP_TIMEOUT_MS", 600_000),
   };
 }

@@ -51,8 +51,8 @@ export function getAgentManifest() {
         args: isSea() ? ["harness"] : ["${installDir}/dist/index.js", "harness"],
         defaultUrl: "http://127.0.0.1:45321",
       },
-      supportedTargets: ["opencode"],
-      reservedTargets: ["codex", "claude-code", "cursor", "vscode"],
+      supportedTargets: ["opencode", "hermes", "codex", "claude-code"],
+      reservedTargets: ["cursor", "vscode"],
       bundledMcp: [
         {
           id: "minimax-bridge",
@@ -65,7 +65,7 @@ export function getAgentManifest() {
           id: "cc-mcp",
           displayName: "CC MCP",
           command: [ccCommand.command, ...ccCommand.args],
-          supportedHarnesses: ["opencode", "claude-code"],
+          supportedHarnesses: ["opencode", "hermes", "codex", "claude-code"],
           tools: CC_TOOLS.map((tool) => tool.name),
         },
       ],
@@ -83,7 +83,7 @@ export function getAgentManifest() {
       permissions: ["network:minimax", "file:write:artifacts", "secret:read:harness-profile"],
       notes: [
         "OpenCode config receives a local command and MCP_HARNESS_HOME only; MiniMax API keys are stored in the local Harness profile.",
-        "Generation tools supported by minimax-mcp-js are proxied to the official MiniMax MCP first when the request is compatible.",
+        "MiniMax Bridge exposes the official minimax-mcp-js tool surface first; Harness extended tools are added only when the official MCP does not expose the same tool name.",
         "The MCP server must not print diagnostics to stdout because stdout is reserved for MCP JSON-RPC.",
         "Generated files are written under MINIMAX_MCP_BASE_PATH unless output_directory is provided per tool.",
       ],

@@ -209,6 +209,10 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
 
   if (!state.installed["cc-mcp"]) {
     const now = nowIso();
+    const ccRuntime = process.platform === "win32" ? "wsl" : "local";
+    const ccCommand = ccRuntime === "wsl" ? "wsl.exe" : "claude";
+    const ccCommandArgs = ccRuntime === "wsl" ? "[\"--\",\"claude\"]" : "[]";
+    const ccWsl = ccRuntime === "wsl" ? "true" : "false";
     state.installed["cc-mcp"] = {
       id: "cc-mcp",
       profileId: "default",
@@ -219,34 +223,69 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
       installedAt: now,
       updatedAt: now,
       env: {
-        CC_CLAUDE_RUNTIME: "wsl",
-        CC_CLAUDE_COMMAND: "wsl.exe",
-        CC_CLAUDE_COMMAND_ARGS: "[\"--\",\"claude\"]",
+        CC_MCP_SERVER_MODE: "local",
+        CC_MCP_REMOTE_NICKNAME: "",
+        CC_MCP_REMOTE_HOST: "",
+        CC_MCP_REMOTE_PORT: "22",
+        CC_MCP_REMOTE_USER: "",
+        CC_MCP_REMOTE_KEY_PATH: "",
+        CC_MCP_REMOTE_PUBLIC_KEY_PATH: "",
+        CC_MCP_REMOTE_INSTALL_DIR: "~/.local/share/mcp-harness/cc-mcp-server",
+        CC_MCP_REMOTE_HARNESS_HOME: "~/.local/share/mcp-harness",
+        CC_MCP_REMOTE_WORKDIR: "",
+        CC_MCP_REMOTE_NODE_COMMAND: "node",
+        CC_MCP_REMOTE_CLAUDE_COMMAND: "claude",
+        CC_MCP_REMOTE_INSTALL_CLAUDE: "true",
+        CC_MCP_PERMISSION_MODE: "main-harness",
+        CC_MCP_PERMISSION_REQUEST_TIMEOUT_MS: "120000",
+        CC_CLAUDE_RUNTIME: ccRuntime,
+        CC_CLAUDE_COMMAND: ccCommand,
+        CC_CLAUDE_COMMAND_ARGS: ccCommandArgs,
         CC_CLAUDE_MODEL: "",
+        CC_CLAUDE_OUTPUT_FORMAT: "stream-json",
+        CC_CLAUDE_INCLUDE_PARTIAL_MESSAGES: "true",
         CC_CLAUDE_MAX_TURNS: "20",
         CC_CLAUDE_TIMEOUT_MS: "1800000",
         CC_CLAUDE_WORKDIR: "",
-        CC_CLAUDE_SKIP_PERMISSIONS: "true",
+        CC_CLAUDE_SKIP_PERMISSIONS: "false",
+        CC_CLAUDE_PERMISSION_APPROVE_INPUT: "y",
+        CC_CLAUDE_PERMISSION_DENY_INPUT: "n",
         CC_CLAUDE_STRICT_MCP_CONFIG: "true",
-        CC_CLAUDE_WSL: "true",
+        CC_CLAUDE_USE_CALLBACK_MCP: "false",
+        CC_CLAUDE_WSL: ccWsl,
       },
-      secretKeys: [],
-      targetHarnesses: ["opencode", "claude-code"],
+      secretKeys: ["CC_MCP_REMOTE_PASSWORD"],
+      targetHarnesses: ["opencode", "hermes", "codex", "claude-code"],
     };
     changed = true;
   }
 
   const installedCcMcp = state.installed["cc-mcp"];
   if (installedCcMcp) {
+    const ccRuntime = process.platform === "win32" ? "wsl" : "local";
     const envDefaults: Record<string, string> = {
-      CC_CLAUDE_RUNTIME: "wsl",
-      CC_CLAUDE_COMMAND: "wsl.exe",
-      CC_CLAUDE_COMMAND_ARGS: "[\"--\",\"claude\"]",
+      CC_MCP_SERVER_MODE: "local",
+      CC_MCP_REMOTE_PORT: "22",
+      CC_MCP_REMOTE_INSTALL_DIR: "~/.local/share/mcp-harness/cc-mcp-server",
+      CC_MCP_REMOTE_HARNESS_HOME: "~/.local/share/mcp-harness",
+      CC_MCP_REMOTE_NODE_COMMAND: "node",
+      CC_MCP_REMOTE_CLAUDE_COMMAND: "claude",
+      CC_MCP_REMOTE_INSTALL_CLAUDE: "true",
+      CC_MCP_PERMISSION_MODE: "main-harness",
+      CC_MCP_PERMISSION_REQUEST_TIMEOUT_MS: "120000",
+      CC_CLAUDE_RUNTIME: ccRuntime,
+      CC_CLAUDE_COMMAND: ccRuntime === "wsl" ? "wsl.exe" : "claude",
+      CC_CLAUDE_COMMAND_ARGS: ccRuntime === "wsl" ? "[\"--\",\"claude\"]" : "[]",
+      CC_CLAUDE_OUTPUT_FORMAT: "stream-json",
+      CC_CLAUDE_INCLUDE_PARTIAL_MESSAGES: "true",
       CC_CLAUDE_MAX_TURNS: "20",
       CC_CLAUDE_TIMEOUT_MS: "1800000",
-      CC_CLAUDE_SKIP_PERMISSIONS: "true",
+      CC_CLAUDE_SKIP_PERMISSIONS: "false",
+      CC_CLAUDE_PERMISSION_APPROVE_INPUT: "y",
+      CC_CLAUDE_PERMISSION_DENY_INPUT: "n",
       CC_CLAUDE_STRICT_MCP_CONFIG: "true",
-      CC_CLAUDE_WSL: "true",
+      CC_CLAUDE_USE_CALLBACK_MCP: "false",
+      CC_CLAUDE_WSL: ccRuntime === "wsl" ? "true" : "false",
     };
     for (const [key, value] of Object.entries(envDefaults)) {
       if (installedCcMcp.env[key] == null || installedCcMcp.env[key] === "") {
@@ -266,9 +305,13 @@ export async function ensureDefaultInstall(): Promise<HarnessState> {
       installedCcMcp.env.CC_CLAUDE_WSL = "true";
       changed = true;
     }
-    const targetHarnesses: HarnessId[] = ["opencode", "claude-code"];
+    const targetHarnesses: HarnessId[] = ["opencode", "hermes", "codex", "claude-code"];
     if (targetHarnesses.some((item) => !installedCcMcp.targetHarnesses.includes(item))) {
       installedCcMcp.targetHarnesses = Array.from(new Set([...installedCcMcp.targetHarnesses, ...targetHarnesses]));
+      changed = true;
+    }
+    if (!installedCcMcp.secretKeys.includes("CC_MCP_REMOTE_PASSWORD")) {
+      installedCcMcp.secretKeys = [...installedCcMcp.secretKeys, "CC_MCP_REMOTE_PASSWORD"];
       changed = true;
     }
   }

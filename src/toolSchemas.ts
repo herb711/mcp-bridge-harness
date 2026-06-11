@@ -11,6 +11,31 @@ const asyncModeProperty = {
   description: "When true, return the provider task_id immediately instead of polling and downloading the final file.",
 };
 
+export const OFFICIAL_MINIMAX_TOOL_NAMES = [
+  "text_to_audio",
+  "list_voices",
+  "play_audio",
+  "voice_clone",
+  "text_to_image",
+  "generate_video",
+  "image_to_video",
+  "query_video_generation",
+  "music_generation",
+  "voice_design",
+] as const;
+
+export const EXTENDED_MINIMAX_TOOL_NAMES = [
+  "web_search",
+  "understand_image",
+  "query_text_to_audio",
+  "video_template_generation",
+  "query_video_template_generation",
+  "lyrics_generation",
+  "music_cover_preprocess",
+] as const;
+
+const officialOnlyToolNames = new Set(["play_audio", "voice_design"]);
+
 export const TOOLS: Tool[] = [
   {
     name: "web_search",
@@ -92,6 +117,18 @@ export const TOOLS: Tool[] = [
         query: { type: "string", description: "Optional fuzzy search against voice_id/name/language." },
         limit: { type: "integer", default: 50, minimum: 1, maximum: 200 },
       },
+    },
+  },
+  {
+    name: "play_audio",
+    description: "Official MiniMax MCP branch. Play a local or URL audio file when the MCP client environment supports audio playback.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputFilePath: { type: "string", description: "Audio file path or URL. Snake_case alias input_file_path is also accepted by the bridge." },
+        isUrl: { type: "boolean", default: false, description: "Whether inputFilePath is a URL. Snake_case alias is_url is also accepted by the bridge." },
+      },
+      required: ["inputFilePath"],
     },
   },
   {
@@ -250,6 +287,20 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "voice_design",
+    description: "Official MiniMax MCP branch. Generate a custom voice from a descriptive prompt and preview text.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Description of the voice to design." },
+        previewText: { type: "string", description: "Preview text to synthesize. Snake_case alias preview_text is also accepted by the bridge." },
+        voiceId: { type: "string", description: "Optional base voice ID. Snake_case alias voice_id is also accepted by the bridge." },
+        outputDirectory: { type: "string", description: "Optional output directory. Snake_case alias output_directory is also accepted by the bridge." },
+      },
+      required: ["prompt", "previewText"],
+    },
+  },
+  {
     name: "music_cover_preprocess",
     description: "HTTP branch. Preprocess a reference audio for two-step music-cover generation; returns cover_feature_id and formatted_lyrics.",
     inputSchema: {
@@ -262,3 +313,8 @@ export const TOOLS: Tool[] = [
     },
   },
 ];
+
+export const OFFICIAL_MINIMAX_TOOL_NAME_SET = new Set<string>(OFFICIAL_MINIMAX_TOOL_NAMES);
+export const EXTENDED_MINIMAX_TOOL_NAME_SET = new Set<string>(EXTENDED_MINIMAX_TOOL_NAMES);
+export const EXTENDED_TOOLS = TOOLS.filter((tool) => EXTENDED_MINIMAX_TOOL_NAME_SET.has(tool.name));
+export const LEGACY_MINIMAX_TOOLS = TOOLS.filter((tool) => !officialOnlyToolNames.has(tool.name));

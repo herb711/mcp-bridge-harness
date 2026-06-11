@@ -38,11 +38,12 @@
       "defaultUrl": "http://127.0.0.1:45321"
     },
     "supportedTargets": [
-      "opencode"
+      "opencode",
+      "hermes",
+      "codex",
+      "claude-code"
     ],
     "reservedTargets": [
-      "codex",
-      "claude-code",
       "cursor",
       "vscode"
     ],
@@ -67,6 +68,7 @@
           "text_to_audio",
           "query_text_to_audio",
           "list_voices",
+          "play_audio",
           "voice_clone",
           "text_to_image",
           "generate_video",
@@ -76,6 +78,7 @@
           "query_video_template_generation",
           "lyrics_generation",
           "music_generation",
+          "voice_design",
           "music_cover_preprocess"
         ]
       },
@@ -92,12 +95,12 @@
         ],
         "supportedHarnesses": [
           "opencode",
+          "hermes",
+          "codex",
           "claude-code"
         ],
         "tools": [
-          "delegate_coding_task",
-          "delegate_to_claude_code",
-          "claude_code_status"
+          "delegate"
         ]
       }
     ]
@@ -340,6 +343,27 @@
               "maximum": 200
             }
           }
+        }
+      },
+      {
+        "name": "play_audio",
+        "description": "Official MiniMax MCP branch. Play a local or URL audio file when the MCP client environment supports audio playback.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "inputFilePath": {
+              "type": "string",
+              "description": "Audio file path or URL. Snake_case alias input_file_path is also accepted by the bridge."
+            },
+            "isUrl": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether inputFilePath is a URL. Snake_case alias is_url is also accepted by the bridge."
+            }
+          },
+          "required": [
+            "inputFilePath"
+          ]
         }
       },
       {
@@ -758,6 +782,35 @@
         }
       },
       {
+        "name": "voice_design",
+        "description": "Official MiniMax MCP branch. Generate a custom voice from a descriptive prompt and preview text.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Description of the voice to design."
+            },
+            "previewText": {
+              "type": "string",
+              "description": "Preview text to synthesize. Snake_case alias preview_text is also accepted by the bridge."
+            },
+            "voiceId": {
+              "type": "string",
+              "description": "Optional base voice ID. Snake_case alias voice_id is also accepted by the bridge."
+            },
+            "outputDirectory": {
+              "type": "string",
+              "description": "Optional output directory. Snake_case alias output_directory is also accepted by the bridge."
+            }
+          },
+          "required": [
+            "prompt",
+            "previewText"
+          ]
+        }
+      },
+      {
         "name": "music_cover_preprocess",
         "description": "HTTP branch. Preprocess a reference audio for two-step music-cover generation; returns cover_feature_id and formatted_lyrics.",
         "inputSchema": {
@@ -799,7 +852,7 @@
     ],
     "notes": [
       "OpenCode config receives a local command and MCP_HARNESS_HOME only; MiniMax API keys are stored in the local Harness profile.",
-      "Generation tools supported by minimax-mcp-js are proxied to the official MiniMax MCP first when the request is compatible.",
+      "MiniMax Bridge exposes the official minimax-mcp-js tool surface first; Harness extended tools are added only when the official MCP does not expose the same tool name.",
       "The MCP server must not print diagnostics to stdout because stdout is reserved for MCP JSON-RPC.",
       "Generated files are written under MINIMAX_MCP_BASE_PATH unless output_directory is provided per tool."
     ]

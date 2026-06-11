@@ -34,6 +34,10 @@ function applyPackagedEnv() {
   process.env.MCP_HARNESS_EXECUTABLE = process.execPath;
 }
 
+function isDesktopPackaged() {
+  return Boolean(process.env.MCP_HARNESS_DESKTOP) || app.isPackaged;
+}
+
 async function ensureMcpShimFromMain() {
   if (!app.isPackaged) return null;
   try {
@@ -151,6 +155,22 @@ ipcMain.handle('harness:openPath', async (_event, filePath) => {
 ipcMain.handle('harness:reinstallShim', async () => {
   const shimPath = await ensureMcpShimFromMain();
   return { ok: Boolean(shimPath), shimPath: shimPath || null };
+});
+
+ipcMain.handle('harness:installUpdate', async (_event, payload) => {
+  if (!isDesktopPackaged()) {
+    return { ok: false, error: '一键更新仅在桌面 App 中可用，请在发布页手动下载安装包。' };
+  }
+  const filePath = payload && typeof payload.filePath === 'string' ? payload.filePath : '';
+  if (!filePath) return { ok: false, error: '未提供本地更新包路径。' };
+  if (!fs.existsSync(filePath)) return { ok: false, error: '更新包不存在或已失效，请重新检查更新。' };
+  try {
+    const result = await shell.openPath(filePath);
+    if (result) return { ok: false, error: result };
+    return { ok: true, filePath };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 });
 
 app.whenReady().then(async () => {
