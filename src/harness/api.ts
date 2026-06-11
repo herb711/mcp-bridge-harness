@@ -48,6 +48,18 @@ function stringRecord(value: unknown): Record<string, string> {
   return out;
 }
 
+function normalizeCcMcpEnv(mcpId: string, env: Record<string, string>): Record<string, string> {
+  if (mcpId !== "cc-mcp") return env;
+  const mode = String(env.CC_MCP_SERVER_MODE || "").trim().toLowerCase();
+  if (mode !== "remote") return env;
+
+  const unifiedWorkdir = String(env.CC_CLAUDE_WORKDIR || "").trim();
+  if (unifiedWorkdir) env.CC_MCP_REMOTE_WORKDIR = unifiedWorkdir;
+  else if (!String(env.CC_MCP_REMOTE_WORKDIR || "").trim()) env.CC_MCP_REMOTE_WORKDIR = "~/";
+  env.CC_CLAUDE_WORKDIR = "";
+  return env;
+}
+
 function commandPartsForPreview(preview: { entry: unknown }): string[] {
   const entry = asRecord(preview.entry);
   if (Array.isArray(entry.command)) {
@@ -255,7 +267,7 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
     const body = asRecord(request.body);
     const mcpId = typeof body.mcpId === "string" ? body.mcpId : "minimax-bridge";
     const profileId = typeof body.profileId === "string" ? body.profileId : "default";
-    const env = stringRecord(body.env);
+    const env = normalizeCcMcpEnv(mcpId, stringRecord(body.env));
     const secrets = stringRecord(body.secrets);
     const installed = await updateMcpProfile({ mcpId, profileId, env, secrets });
     const effectiveEnv = await getEffectiveEnv(mcpId, profileId);
@@ -277,7 +289,7 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
 
   if (method === "POST" && url.pathname === "/api/cc/remote/setup") {
     const body = asRecord(request.body);
-    const env = stringRecord(body.env);
+    const env = normalizeCcMcpEnv("cc-mcp", stringRecord(body.env));
     const secrets = stringRecord(body.secrets);
     const autoApply = body.autoApply !== false;
     await updateMcpProfile({ mcpId: "cc-mcp", profileId: "default", env, secrets });
@@ -317,7 +329,7 @@ export async function handleHarnessApi(request: HarnessApiRequest): Promise<unkn
     const mcpId = typeof body.mcpId === "string" ? body.mcpId : "minimax-bridge";
     const profileId = typeof body.profileId === "string" ? body.profileId : "default";
     const enabled = typeof body.enabled === "boolean" ? body.enabled : true;
-    const env = stringRecord(body.env);
+    const env = normalizeCcMcpEnv(mcpId, stringRecord(body.env));
     const secrets = stringRecord(body.secrets);
     assertMcpSupportsHarness(mcpId, applyHarnessId);
     if (Object.keys(env).length || Object.keys(secrets).length) {

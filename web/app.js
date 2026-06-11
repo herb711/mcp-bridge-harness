@@ -41,6 +41,7 @@ const remoteCcFieldKeys = new Set([
   "CC_MCP_REMOTE_CLAUDE_COMMAND",
   "CC_MCP_REMOTE_INSTALL_CLAUDE",
 ]);
+const REMOTE_CC_WORKDIR_DEFAULT = "~/";
 
 function $(selector) { return document.querySelector(selector); }
 function $all(selector) { return Array.from(document.querySelectorAll(selector)); }
@@ -410,7 +411,7 @@ function renderProfileForm() {
   const advancedContainer = $("#mcpAdvancedFields");
   const advancedBlock = $("#mcpAdvancedBlock");
   if (!coreContainer || !advancedContainer || !advancedBlock) {
-    $("#mcpFields").innerHTML = fields.map((field) => renderField(field, env[field.key])).join("");
+    $("#mcpFields").innerHTML = fields.map((field) => renderField(field, fieldValueForUi(field, env))).join("");
     updateCcRemoteVisibility();
     return;
   }
@@ -422,11 +423,22 @@ function renderProfileForm() {
     else core.push(field);
   }
   coreContainer.innerHTML = core.length
-    ? core.map((field) => renderField(field, env[field.key])).join("")
+    ? core.map((field) => renderField(field, fieldValueForUi(field, env))).join("")
     : `<p class="muted">这个 MCP 暂无可配置字段。</p>`;
-  advancedContainer.innerHTML = advanced.map((field) => renderField(field, env[field.key])).join("");
+  advancedContainer.innerHTML = advanced.map((field) => renderField(field, fieldValueForUi(field, env))).join("");
   advancedBlock.classList.toggle("hidden", advanced.length === 0);
   updateCcRemoteVisibility();
+}
+
+function ccServerModeFromEnv(env) {
+  return String(env?.CC_MCP_SERVER_MODE || "local").toLowerCase();
+}
+
+function fieldValueForUi(field, env) {
+  if (state.selectedMcpId === "cc-mcp" && field.key === "CC_CLAUDE_WORKDIR" && ccServerModeFromEnv(env) === "remote") {
+    return env.CC_MCP_REMOTE_WORKDIR || env.CC_CLAUDE_WORKDIR || REMOTE_CC_WORKDIR_DEFAULT;
+  }
+  return env[field.key];
 }
 
 function renderCcWorkdirField(field, id, required, help, safeValue) {
@@ -445,6 +457,22 @@ function renderCcWorkdirField(field, id, required, help, safeValue) {
   `;
 }
 
+function renderUnifiedCcWorkdirField(field, id, required, safeValue) {
+  const autoPath = state.status?.defaultClaudeCodeWorkdir || "current Harness project path";
+  const isAuto = !String(safeValue || "").trim();
+  return `
+    <label class="workdir-field" for="${escapeHtml(id)}">
+      <span><span class="workdir-label-text">Claude Code Workdir</span>${required}<em class="auto-pill">${isAuto ? "auto" : "custom"}</em></span>
+      <div class="input-action-row">
+        <input id="${escapeHtml(id)}" name="${escapeHtml(field.key)}" type="text" autocomplete="off" placeholder="Local: auto; remote: ~/" value="${escapeHtml(safeValue)}" />
+        <button type="button" class="ghost small-button" data-use-auto-workdir>Use default</button>
+      </div>
+      <small class="workdir-default-text">Local default: <code>${escapeHtml(autoPath)}</code>; remote default: <code>${escapeHtml(REMOTE_CC_WORKDIR_DEFAULT)}</code></small>
+      <small>Remote mode saves this value as <code>CC_MCP_REMOTE_WORKDIR</code>; local mode saves it as <code>CC_CLAUDE_WORKDIR</code>.</small>
+    </label>
+  `;
+}
+
 function renderField(field, value) {
   const id = `field_${field.key}`;
   const required = field.required ? " <b>*</b>" : "";
@@ -455,7 +483,7 @@ function renderField(field, value) {
   const fieldAttr = `data-field-key="${escapeHtml(field.key)}"`;
 
   if (field.key === "CC_CLAUDE_WORKDIR") {
-    return renderCcWorkdirField(field, id, required, help, safeValue);
+    return renderUnifiedCcWorkdirField(field, id, required, safeValue);
   }
 
   if (field.type === "boolean") {
@@ -596,7 +624,18 @@ function collectForm() {
     if (field.secret) secrets[field.key] = value;
     else env[field.key] = value;
   }
+  normalizeCcWorkdirEnv(env);
   return { env, secrets };
+}
+
+function normalizeCcWorkdirEnv(env) {
+  if (state.selectedMcpId !== "cc-mcp") return;
+  const mode = String(env.CC_MCP_SERVER_MODE || "local").toLowerCase();
+  const workdir = String(env.CC_CLAUDE_WORKDIR || "").trim();
+  if (mode === "remote") {
+    env.CC_MCP_REMOTE_WORKDIR = workdir || REMOTE_CC_WORKDIR_DEFAULT;
+    env.CC_CLAUDE_WORKDIR = "";
+  }
 }
 
 async function saveProfile({ silent = false } = {}) {
@@ -627,6 +666,25 @@ function updateCcRemoteVisibility() {
   $all(".remote-cc-field").forEach((el) => el.classList.toggle("hidden", !remote));
   $("#setupRemoteCcBtn")?.classList.toggle("hidden", state.selectedMcpId !== "cc-mcp" || !remote);
   $("#detectClaudeBtn")?.classList.toggle("hidden", state.selectedMcpId !== "cc-mcp" || remote);
+  updateWorkdirModeUi();
+}
+
+function updateWorkdirModeUi() {
+  const input = $("#field_CC_CLAUDE_WORKDIR");
+  if (!input) return;
+  const remote = isCcRemoteSelected();
+  if (remote && !String(input.value || "").trim()) input.value = REMOTE_CC_WORKDIR_DEFAULT;
+  if (!remote && String(input.value || "").trim() === REMOTE_CC_WORKDIR_DEFAULT) input.value = "";
+  input.placeholder = remote ? REMOTE_CC_WORKDIR_DEFAULT : "Local: auto";
+
+  const text = input.closest(".workdir-field")?.querySelector(".workdir-default-text");
+  if (text) {
+    const autoPath = state.status?.defaultClaudeCodeWorkdir || "current Harness project path";
+    text.innerHTML = remote
+      ? `Remote default: <code>${escapeHtml(REMOTE_CC_WORKDIR_DEFAULT)}</code>; saved as <code>CC_MCP_REMOTE_WORKDIR</code>.`
+      : `Local default: <code>${escapeHtml(autoPath)}</code>; saved as <code>CC_CLAUDE_WORKDIR</code>.`;
+  }
+  updateWorkdirAutoPill(input);
 }
 
 function applyClaudeDetection(detected) {
@@ -985,12 +1043,16 @@ $("#mcpProfileForm").addEventListener("click", (event) => {
   if (!button) return;
   const input = $("#field_CC_CLAUDE_WORKDIR");
   if (!input) return;
-  input.value = "";
-  updateWorkdirAutoPill(input);
+  input.value = isCcRemoteSelected() ? REMOTE_CC_WORKDIR_DEFAULT : "";
+  updateWorkdirModeUi();
+  if (isCcRemoteSelected()) {
+    showAlert(`Remote Claude Code Workdir will use ${REMOTE_CC_WORKDIR_DEFAULT}.`, "ok");
+    return;
+  }
   showAlert(`Claude Code Workdir 将自动使用：${state.status?.defaultClaudeCodeWorkdir || "当前 Harness 项目路径"}`, "ok");
 });
 $("#mcpProfileForm").addEventListener("input", (event) => {
-  if (event.target?.id === "field_CC_CLAUDE_WORKDIR") updateWorkdirAutoPill(event.target);
+  if (event.target?.id === "field_CC_CLAUDE_WORKDIR") updateWorkdirModeUi();
   if (event.target?.id === "field_CC_MCP_SERVER_MODE") updateCcRemoteVisibility();
 });
 $("#mcpProfileForm").addEventListener("change", (event) => {

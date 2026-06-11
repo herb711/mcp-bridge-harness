@@ -5,28 +5,9 @@ const delegatedCodingTaskSchema: Tool["inputSchema"] = {
   properties: {
     action: {
       type: "string",
-      enum: ["task", "start", "tail", "result", "cancel", "status", "append_file", "finalize_file", "run_command"],
-      default: "start",
-      description: "Action to perform. For delegated coding work, set action=start first, then poll action=tail with the returned session_id and latest nextOffset until done, then call action=result. Use action=task only when the user explicitly asks for a single blocking synchronous call. The other actions support status checks, cancellation, and chunked script transfer.",
-    },
-    session_id: {
-      type: "string",
-      description: "For tail/result/cancel: session id returned by action=start.",
-    },
-    offset: {
-      type: "integer",
-      minimum: 0,
-      description: "For tail: byte offset returned as nextOffset by the previous tail call.",
-    },
-    max_bytes: {
-      type: "integer",
-      minimum: 1024,
-      description: "For tail: maximum terminal log bytes to return. Defaults to 131072.",
-    },
-    wait_ms: {
-      type: "integer",
-      minimum: 0,
-      description: "For tail: long-poll wait time in milliseconds when no new output is available. Defaults to 3000.",
+      enum: ["task", "status", "append_file", "finalize_file", "run_command"],
+      default: "task",
+      description: "Optional action. Omit or use task for normal delegation. The other actions are internal support paths for status checks and chunked script transfer.",
     },
     workspace: {
       type: "string",
@@ -141,7 +122,7 @@ const delegatedCodingTaskSchema: Tool["inputSchema"] = {
 };
 
 function delegatedToolDescription(): string {
-  return "Delegate one concrete coding task to the configured Claude Code worker through cc-mcp. Use this as the single cc-mcp entrypoint. For normal delegated coding work, always call action=start first, then repeatedly call action=tail with the returned session_id and latest nextOffset to surface progress, then call action=result when the session is done. Use action=task only when the user explicitly asks for a single blocking synchronous call. Once delegated, the worker performs file edits, shell commands, tests, and inspection inside its configured workspace while the main harness supervises and verifies. Do not put long scripts, huge base64 payloads, or heredocs in task; if chunked transfer is absolutely needed, use this same delegate tool with action=append_file, action=finalize_file, then action=run_command.";
+  return "Delegate one concrete coding task to the configured Claude Code worker through cc-mcp. Use this as the single cc-mcp entrypoint. Omit action or use action=task for normal work: once delegated, the worker performs file edits, shell commands, tests, and inspection inside its configured workspace while the main harness supervises and verifies. Do not put long scripts, huge base64 payloads, or heredocs in task; if chunked transfer is absolutely needed, use this same delegate tool with action=append_file, action=finalize_file, then action=run_command.";
 }
 
 const workspaceAppendFileSchema: Tool["inputSchema"] = {

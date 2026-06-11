@@ -72,6 +72,18 @@ function portValue(value: unknown): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 22;
 }
 
+function remoteWorkdirValue(env: Record<string, string>): string {
+  const remoteWorkdir = stringValue(env.CC_MCP_REMOTE_WORKDIR);
+  if (remoteWorkdir) return remoteWorkdir;
+
+  const legacyUnifiedWorkdir = stringValue(env.CC_CLAUDE_WORKDIR);
+  if (legacyUnifiedWorkdir && !/^[a-zA-Z]:[\\/]/.test(legacyUnifiedWorkdir)) {
+    return legacyUnifiedWorkdir;
+  }
+
+  return "~/";
+}
+
 export function remoteCcConfigFromEnv(env: Record<string, string>): RemoteCcConfig {
   return {
     enabled: stringValue(env.CC_MCP_SERVER_MODE).toLowerCase() === "remote" || boolValue(env.CC_MCP_REMOTE_ENABLED),
@@ -84,7 +96,7 @@ export function remoteCcConfigFromEnv(env: Record<string, string>): RemoteCcConf
     publicKeyPath: normalizeLocalPath(env.CC_MCP_REMOTE_PUBLIC_KEY_PATH),
     installDir: stringValue(env.CC_MCP_REMOTE_INSTALL_DIR) || DEFAULT_INSTALL_DIR,
     harnessHome: stringValue(env.CC_MCP_REMOTE_HARNESS_HOME) || DEFAULT_HARNESS_HOME,
-    workdir: stringValue(env.CC_MCP_REMOTE_WORKDIR) || "",
+    workdir: remoteWorkdirValue(env),
     nodeCommand: stringValue(env.CC_MCP_REMOTE_NODE_COMMAND) || "node",
     claudeCommand: stringValue(env.CC_MCP_REMOTE_CLAUDE_COMMAND) || "claude",
     installClaude: boolValue(env.CC_MCP_REMOTE_INSTALL_CLAUDE, true),

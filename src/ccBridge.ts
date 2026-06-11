@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -8,7 +8,7 @@ import { appDataDir, commandForBundledMcp, defaultClaudeCodeWorkdir } from "./ha
 export interface CcDelegateResult {
   ok: boolean;
   sessionId: string;
-  status: "completed" | "failed" | "timeout" | "missing_claude" | "invalid_request" | "cancelled";
+  status: "completed" | "failed" | "timeout" | "missing_claude" | "invalid_request";
   exitCode: number | null;
   durationMs: number;
   resultText: string;
@@ -18,48 +18,6 @@ export interface CcDelegateResult {
   permissionRequests?: CcPermissionRequest[];
   rawClaudeOutput?: unknown;
   stderrTail?: string;
-  error?: string;
-}
-
-export interface CcStartResult {
-  ok: boolean;
-  sessionId: string;
-  status: "running" | "invalid_request";
-  running: boolean;
-  done: boolean;
-  startedAt: string;
-  workspace?: string;
-  cwd?: string;
-  pid?: number;
-  terminalLog: CcTerminalLog;
-  resultPath?: string;
-  error?: string;
-}
-
-export interface CcTailResult {
-  ok: boolean;
-  sessionId: string;
-  status: CcDelegateResult["status"] | "running" | "unknown";
-  running: boolean;
-  done: boolean;
-  offset: number;
-  nextOffset: number;
-  bytes: number;
-  text: string;
-  truncated: boolean;
-  terminalLogPath: string;
-  resultAvailable: boolean;
-  error?: string;
-}
-
-export interface CcRunningSessionResult {
-  ok: false;
-  sessionId: string;
-  status: "running" | "unknown";
-  running: boolean;
-  done: false;
-  terminalLog?: CcTerminalLog;
-  resultAvailable: false;
   error?: string;
 }
 
@@ -223,38 +181,10 @@ interface PreparedClaudeRun {
   terminalLogPath: string;
 }
 
-interface CcSessionState {
-  sessionId: string;
-  status: CcDelegateResult["status"] | "running";
-  running: boolean;
-  done: boolean;
-  startedAt: string;
-  updatedAt: string;
-  workspace?: string;
-  cwd?: string;
-  pid?: number;
-  terminalLogPath: string;
-  resultPath: string;
-  exitCode?: number | null;
-  durationMs?: number;
-  error?: string;
-}
-
-interface ActiveCcSession {
-  sessionId: string;
-  sessionDir: string;
-  child?: ChildProcessWithoutNullStreams;
-  completion: Promise<CcDelegateResult>;
-  startedAt: number;
-  cancelled: boolean;
-}
-
 const CALLBACK_FILE = "callbacks.jsonl";
 const TASK_FILE = "task.json";
 const MCP_CONFIG_FILE = "mcp-config.json";
 const TERMINAL_LOG_FILE = "terminal.jsonl";
-const RESULT_FILE = "result.json";
-const STATE_FILE = "state.json";
 const CALLBACK_SERVER_NAME = "cc_mcp_callback";
 const CALLBACK_SEND_TOOL_NAME = "send_message_to_harness";
 const CALLBACK_READ_TOOL_NAME = "read_harness_task";
@@ -265,9 +195,6 @@ const MAX_TAIL_CHARS = 8000;
 const MAX_EVENTS = 500;
 const MAX_PERMISSION_PROMPT_CHARS = 4000;
 const MAX_WORKSPACE_TRANSFER_CHUNK_CHARS = 4096;
-const DEFAULT_TAIL_WAIT_MS = 3000;
-const MAX_TAIL_READ_BYTES = 128 * 1024;
-const activeCcSessions = new Map<string, ActiveCcSession>();
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -280,11 +207,6 @@ function stringValue(value: unknown): string | undefined {
 function numberValue(value: unknown): number | undefined {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function nonNegativeNumberValue(value: unknown): number | undefined {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function booleanValue(value: unknown, fallback = false): boolean {
@@ -801,7 +723,6 @@ interface SpawnCaptureOptions {
   config?: CcConfig;
   terminalLogPath?: string;
   hooks?: CcRunHooks;
-  onChild?: (child: ChildProcessWithoutNullStreams) => void;
 }
 
 function normalizePermissionInput(value: string): string {
@@ -925,7 +846,6 @@ async function spawnAndCapture(command: string, args: string[], cwd: string, tim
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
-    options.onChild?.(child);
 
     async function handlePermissionPrompt(prompt: string): Promise<void> {
       if (permissionInFlight || settled) return;
@@ -1184,7 +1104,7 @@ async function prepareClaudeCodeRun(rawArgs: unknown, profileId: string, start: 
   };
 }
 
-async function completeClaudeCodeRun(run: PreparedClaudeRun, spawned: SpawnResult, overrideStatus?: CcDelegateResult["status"]): Promise<CcDelegateResult> {
+async function completeClaudeCodeRun(run: PreparedClaudeRun, spawned: SpawnResult): Promise<CcDelegateResult> {
   const callbacks = await readCallbacks(run.sessionDir);
   const parsed = parseClaudeOutput(spawned.stdout);
   const missingClaude = (spawned.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
@@ -1195,12 +1115,11 @@ async function completeClaudeCodeRun(run: PreparedClaudeRun, spawned: SpawnResul
       : spawned.exitCode === 0
         ? "completed"
         : "failed";
-  const status = overrideStatus || detectedStatus;
 
   return {
-    ok: status === "completed",
+    ok: detectedStatus === "completed",
     sessionId: run.sessionId,
-    status,
+    status: detectedStatus,
     exitCode: spawned.exitCode,
     durationMs: Date.now() - run.start,
     resultText: parsed.resultText,
@@ -1210,208 +1129,8 @@ async function completeClaudeCodeRun(run: PreparedClaudeRun, spawned: SpawnResul
     permissionRequests: spawned.permissionRequests,
     rawClaudeOutput: parsed.rawClaudeOutput,
     stderrTail: tail(spawned.stderr),
-    error: status === "cancelled"
-      ? "Claude Code session was cancelled."
-      : spawned.error
-        ? (spawned.error instanceof Error ? spawned.error.message : String(spawned.error))
-        : undefined,
+    error: spawned.error ? (spawned.error instanceof Error ? spawned.error.message : String(spawned.error)) : undefined,
   };
-}
-
-function resultPathForSessionDir(sessionDir: string): string {
-  return path.join(sessionDir, RESULT_FILE);
-}
-
-function statePathForSessionDir(sessionDir: string): string {
-  return path.join(sessionDir, STATE_FILE);
-}
-
-function sessionDirForId(sessionId: string): string {
-  const clean = sanitizeSessionId(sessionId);
-  if (!clean) throw new Error("delegate session action requires a valid session_id.");
-  return path.join(sessionsBaseDir(), clean);
-}
-
-async function writeSessionState(sessionDir: string, state: CcSessionState): Promise<void> {
-  await ensureDirectory(sessionDir);
-  await fs.writeFile(statePathForSessionDir(sessionDir), JSON.stringify(state, null, 2) + "\n", "utf8");
-}
-
-async function readSessionState(sessionDir: string): Promise<CcSessionState | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(statePathForSessionDir(sessionDir), "utf8")) as CcSessionState;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-async function readSessionResult(sessionDir: string): Promise<CcDelegateResult | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(resultPathForSessionDir(sessionDir), "utf8")) as CcDelegateResult;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function appendProcessTerminalLog(sessionDir: string, text: string, metadata?: unknown): Promise<void> {
-  await ensureDirectory(sessionDir);
-  const timestamp = new Date().toISOString();
-  await fs.appendFile(path.join(sessionDir, TERMINAL_LOG_FILE), JSON.stringify({
-    timestamp,
-    stream: "process",
-    kind: "process",
-    text,
-    metadata,
-  }) + "\n", "utf8");
-}
-
-function sessionIdArg(rawArgs: unknown): string {
-  const record = asRecord(rawArgs);
-  const sessionId = stringValue(record.session_id) || stringValue(record.sessionId);
-  if (!sessionId) throw new Error("delegate session action requires session_id.");
-  return sessionId;
-}
-
-function tailArgs(rawArgs: unknown): { sessionId: string; offset: number; maxBytes: number; waitMs: number } {
-  const record = asRecord(rawArgs);
-  const offset = nonNegativeNumberValue(record.offset)
-    ?? nonNegativeNumberValue(record.since_offset)
-    ?? nonNegativeNumberValue(record.sinceOffset)
-    ?? nonNegativeNumberValue(record.cursor)
-    ?? 0;
-  const maxBytes = Math.min(
-    MAX_TAIL_READ_BYTES,
-    Math.max(1024, Math.floor(numberValue(record.max_bytes) ?? numberValue(record.maxBytes) ?? MAX_TAIL_READ_BYTES)),
-  );
-  const waitMs = Math.min(
-    10000,
-    Math.max(0, Math.floor(nonNegativeNumberValue(record.wait_ms) ?? nonNegativeNumberValue(record.waitMs) ?? DEFAULT_TAIL_WAIT_MS)),
-  );
-  return {
-    sessionId: sessionIdArg(rawArgs),
-    offset: Math.floor(offset),
-    maxBytes,
-    waitMs,
-  };
-}
-
-function formatTerminalJsonl(jsonl: string): string {
-  const out: string[] = [];
-  for (const line of jsonl.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      const record = asRecord(JSON.parse(line));
-      const timestamp = stringValue(record.timestamp) || "";
-      const stream = stringValue(record.stream) || "output";
-      const text = typeof record.text === "string"
-        ? record.text
-        : record.text == null
-          ? ""
-          : JSON.stringify(record.text);
-      if (text) out.push(`[${timestamp} ${stream}]\n${text}${text.endsWith("\n") ? "" : "\n"}`);
-    } catch {
-      out.push(line);
-    }
-  }
-  return out.join("").trimEnd();
-}
-
-async function readTerminalLogSlice(sessionDir: string, offset: number, maxBytes: number): Promise<{
-  path: string;
-  offset: number;
-  nextOffset: number;
-  bytes: number;
-  text: string;
-  truncated: boolean;
-}> {
-  const terminalLogPath = path.join(sessionDir, TERMINAL_LOG_FILE);
-  let size = 0;
-  try {
-    size = (await fs.stat(terminalLogPath)).size;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return {
-      path: terminalLogPath,
-      offset: 0,
-      nextOffset: 0,
-      bytes: 0,
-      text: "",
-      truncated: false,
-    };
-  }
-
-  const safeOffset = Math.min(Math.max(0, Math.floor(offset)), size);
-  let startOffset = safeOffset;
-  let length = size - safeOffset;
-  let truncated = false;
-  if (length > maxBytes) {
-    startOffset = size - maxBytes;
-    length = maxBytes;
-    truncated = true;
-  }
-  if (length <= 0) {
-    return {
-      path: terminalLogPath,
-      offset: safeOffset,
-      nextOffset: size,
-      bytes: 0,
-      text: "",
-      truncated,
-    };
-  }
-
-  const handle = await fs.open(terminalLogPath, "r");
-  try {
-    const buffer = Buffer.alloc(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, startOffset);
-    return {
-      path: terminalLogPath,
-      offset: startOffset,
-      nextOffset: size,
-      bytes: bytesRead,
-      text: formatTerminalJsonl(buffer.subarray(0, bytesRead).toString("utf8")),
-      truncated,
-    };
-  } finally {
-    await handle.close();
-  }
-}
-
-async function sessionInfo(sessionId: string, sessionDir: string): Promise<{
-  status: CcTailResult["status"];
-  running: boolean;
-  done: boolean;
-  resultAvailable: boolean;
-  state?: CcSessionState;
-}> {
-  const active = activeCcSessions.get(sessionId);
-  const state = await readSessionState(sessionDir);
-  const result = await readSessionResult(sessionDir);
-  const resultAvailable = Boolean(result);
-  const running = Boolean(active);
-  const status = running ? "running" : result?.status || state?.status || "unknown";
-  return {
-    status,
-    running,
-    done: !running && status !== "unknown" && status !== "running",
-    resultAvailable,
-    state,
-  };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function delegateToClaudeCode(rawArgs: unknown, profileId = "default", hooks: CcRunHooks = {}): Promise<CcDelegateResult> {
@@ -1427,220 +1146,6 @@ export async function delegateToClaudeCode(rawArgs: unknown, profileId = "defaul
     terminalLogPath: run.terminalLogPath,
   });
   return completeClaudeCodeRun(run, spawned);
-}
-
-export async function startClaudeCodeTask(rawArgs: unknown, profileId = "default", hooks: CcRunHooks = {}): Promise<CcStartResult | CcDelegateResult> {
-  const start = Date.now();
-  const prepared = await prepareClaudeCodeRun(rawArgs, profileId, start);
-  if (!prepared.ok) {
-    return {
-      ...prepared.result,
-      status: "invalid_request",
-    };
-  }
-
-  const run = prepared.run;
-  const startedAt = new Date(start).toISOString();
-  let childRef: ChildProcessWithoutNullStreams | undefined;
-  const resultPath = resultPathForSessionDir(run.sessionDir);
-  const initialState: CcSessionState = {
-    sessionId: run.sessionId,
-    status: "running",
-    running: true,
-    done: false,
-    startedAt,
-    updatedAt: new Date().toISOString(),
-    workspace: run.task.workspace,
-    cwd: run.task.cwd,
-    terminalLogPath: run.terminalLogPath,
-    resultPath,
-  };
-  await writeSessionState(run.sessionDir, initialState);
-  await appendProcessTerminalLog(run.sessionDir, "Claude Code async session started.", { sessionId: run.sessionId });
-
-  const completion = spawnAndCapture(run.config.command, run.claudeArgs, run.task.cwd, run.timeoutMs, {
-    sessionId: run.sessionId,
-    config: run.config,
-    hooks,
-    terminalLogPath: run.terminalLogPath,
-    onChild(child) {
-      childRef = child;
-    },
-  }).then(async (spawned) => {
-    const active = activeCcSessions.get(run.sessionId);
-    const result = await completeClaudeCodeRun(run, spawned, active?.cancelled ? "cancelled" : undefined);
-    await fs.writeFile(resultPath, JSON.stringify(result, null, 2) + "\n", "utf8");
-    await writeSessionState(run.sessionDir, {
-      ...initialState,
-      status: result.status,
-      running: false,
-      done: true,
-      updatedAt: new Date().toISOString(),
-      pid: childRef?.pid,
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      error: result.error,
-    });
-    activeCcSessions.delete(run.sessionId);
-    return result;
-  }).catch(async (error) => {
-    const result: CcDelegateResult = {
-      ok: false,
-      sessionId: run.sessionId,
-      status: "failed",
-      exitCode: null,
-      durationMs: Date.now() - start,
-      resultText: "",
-      callbacks: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-    await fs.writeFile(resultPath, JSON.stringify(result, null, 2) + "\n", "utf8").catch(() => undefined);
-    await writeSessionState(run.sessionDir, {
-      ...initialState,
-      status: "failed",
-      running: false,
-      done: true,
-      updatedAt: new Date().toISOString(),
-      pid: childRef?.pid,
-      exitCode: null,
-      durationMs: result.durationMs,
-      error: result.error,
-    }).catch(() => undefined);
-    activeCcSessions.delete(run.sessionId);
-    return result;
-  });
-
-  activeCcSessions.set(run.sessionId, {
-    sessionId: run.sessionId,
-    sessionDir: run.sessionDir,
-    child: childRef,
-    completion,
-    startedAt: start,
-    cancelled: false,
-  });
-
-  const stateWithPid = {
-    ...initialState,
-    pid: childRef?.pid,
-    updatedAt: new Date().toISOString(),
-  };
-  await writeSessionState(run.sessionDir, stateWithPid);
-
-  return {
-    ok: true,
-    sessionId: run.sessionId,
-    status: "running",
-    running: true,
-    done: false,
-    startedAt,
-    workspace: run.task.workspace,
-    cwd: run.task.cwd,
-    pid: childRef?.pid,
-    terminalLog: {
-      path: run.terminalLogPath,
-      format: "jsonl",
-      bytes: 0,
-      text: "",
-      truncated: false,
-    },
-    resultPath,
-  };
-}
-
-export async function tailClaudeCodeSession(rawArgs: unknown): Promise<CcTailResult> {
-  const args = tailArgs(rawArgs);
-  const sessionDir = sessionDirForId(args.sessionId);
-  const started = Date.now();
-
-  while (true) {
-    const info = await sessionInfo(args.sessionId, sessionDir);
-    const log = await readTerminalLogSlice(sessionDir, args.offset, args.maxBytes);
-    if (log.bytes > 0 || !info.running || Date.now() - started >= args.waitMs) {
-      return {
-        ok: true,
-        sessionId: args.sessionId,
-        status: info.status,
-        running: info.running,
-        done: info.done,
-        offset: log.offset,
-        nextOffset: log.nextOffset,
-        bytes: log.bytes,
-        text: log.text,
-        truncated: log.truncated,
-        terminalLogPath: log.path,
-        resultAvailable: info.resultAvailable,
-      };
-    }
-    await sleep(Math.min(250, Math.max(25, args.waitMs - (Date.now() - started))));
-  }
-}
-
-export async function getClaudeCodeSessionResult(rawArgs: unknown): Promise<CcDelegateResult | CcRunningSessionResult> {
-  const sessionId = sessionIdArg(rawArgs);
-  const sessionDir = sessionDirForId(sessionId);
-  const active = activeCcSessions.get(sessionId);
-  if (active) {
-    const log = await readTerminalLogSlice(sessionDir, 0, MAX_TAIL_READ_BYTES);
-    return {
-      ok: false,
-      sessionId,
-      status: "running",
-      running: true,
-      done: false,
-      terminalLog: {
-        path: log.path,
-        format: "jsonl",
-        bytes: log.nextOffset,
-        text: log.text,
-        truncated: log.truncated,
-      },
-      resultAvailable: false,
-    };
-  }
-
-  const result = await readSessionResult(sessionDir);
-  if (result) return result;
-  return {
-    ok: false,
-    sessionId,
-    status: "unknown",
-    running: false,
-    done: false,
-    resultAvailable: false,
-    error: "No completed Claude Code result is available for this session.",
-  };
-}
-
-export async function cancelClaudeCodeSession(rawArgs: unknown): Promise<unknown> {
-  const sessionId = sessionIdArg(rawArgs);
-  const sessionDir = sessionDirForId(sessionId);
-  const active = activeCcSessions.get(sessionId);
-  if (!active) {
-    const info = await sessionInfo(sessionId, sessionDir);
-    return {
-      ok: false,
-      sessionId,
-      status: info.status,
-      running: info.running,
-      done: info.done,
-      resultAvailable: info.resultAvailable,
-      error: "No running Claude Code session is available to cancel.",
-    };
-  }
-
-  active.cancelled = true;
-  await appendProcessTerminalLog(sessionDir, "Cancellation requested by main harness.", { sessionId });
-  active.child?.kill("SIGTERM");
-  setTimeout(() => {
-    if (activeCcSessions.has(sessionId)) active.child?.kill("SIGKILL");
-  }, 3000).unref();
-  return {
-    ok: true,
-    sessionId,
-    status: "cancelling",
-    running: true,
-    done: false,
-  };
 }
 
 export async function claudeCodeStatus(): Promise<CcStatusResult> {

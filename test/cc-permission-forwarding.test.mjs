@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { delegateToClaudeCode, getClaudeCodeSessionResult, startClaudeCodeTask, tailClaudeCodeSession, workspaceAppendFile, workspaceFinalizeFile, workspaceRunCommand } from "../dist/ccBridge.js";
+import { delegateToClaudeCode, workspaceAppendFile, workspaceFinalizeFile, workspaceRunCommand } from "../dist/ccBridge.js";
 
 function setEnv(values) {
   const previous = new Map();
@@ -42,18 +42,6 @@ process.stdin.on("data", (chunk) => {
   return fakeClaudePath;
 }
 
-async function writeSlowFakeClaude(tempDir) {
-  const fakeClaudePath = path.join(tempDir, "fake-slow-claude.mjs");
-  await fs.writeFile(fakeClaudePath, `
-process.stdout.write("phase-one\\n");
-setTimeout(() => {
-  process.stderr.write("phase-two\\n");
-  process.stdout.write(JSON.stringify({ result: "async-done" }) + "\\n");
-}, 150);
-`, "utf8");
-  return fakeClaudePath;
-}
-
 function fakeClaudeEnv(tempDir, fakeClaudePath) {
   return {
     MCP_HARNESS_HOME: path.join(tempDir, "harness-home"),
@@ -73,19 +61,6 @@ function fakeClaudeEnv(tempDir, fakeClaudePath) {
     CC_CLAUDE_USE_CALLBACK_MCP: "false",
     CC_CLAUDE_WSL: "false",
   };
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForCompletedResult(sessionId) {
-  for (let index = 0; index < 20; index += 1) {
-    const result = await getClaudeCodeSessionResult({ session_id: sessionId });
-    if (result.status !== "running") return result;
-    await sleep(100);
-  }
-  throw new Error(`Timed out waiting for async result: ${sessionId}`);
 }
 
 test("cc-mcp forwards detected Claude Code permission prompts through hooks", { concurrency: false }, async () => {
@@ -127,57 +102,6 @@ test("cc-mcp forwards detected Claude Code permission prompts through hooks", { 
     assert.ok(permissionPrompts[0].includes("Allow?"));
     assert.ok(events.some((event) => event.kind === "permission"), "permission events should be emitted");
     assert.ok(result.terminalLog?.text.includes("Permission approved"), "terminal log should include the decision");
-  } finally {
-    restoreEnv();
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test("cc-mcp async sessions expose Claude Code output through tail and result", { concurrency: false }, async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcp-harness-cc-async-"));
-  const fakeClaudePath = await writeSlowFakeClaude(tempDir);
-  const restoreEnv = setEnv(fakeClaudeEnv(tempDir, fakeClaudePath));
-
-  try {
-    const started = await startClaudeCodeTask({
-      mode: "implement",
-      task: "Run the fake async flow.",
-      acceptance_criteria: ["The fake async flow returns its final result."],
-      timeout_ms: 10000,
-      max_turns: 1,
-    });
-
-    assert.equal(started.ok, true);
-    assert.equal(started.status, "running");
-    assert.ok(started.sessionId);
-
-    const firstTail = await tailClaudeCodeSession({
-      session_id: started.sessionId,
-      wait_ms: 1000,
-    });
-    assert.equal(firstTail.ok, true);
-    assert.match(firstTail.text, /phase-one|Claude Code async session started/);
-
-    const secondTail = await tailClaudeCodeSession({
-      session_id: started.sessionId,
-      offset: firstTail.nextOffset,
-      wait_ms: 1000,
-    });
-    assert.equal(secondTail.ok, true);
-
-    const result = await waitForCompletedResult(started.sessionId);
-    assert.equal(result.ok, true);
-    assert.equal(result.status, "completed");
-    assert.equal(result.resultText, "async-done");
-
-    const fullTail = await tailClaudeCodeSession({
-      session_id: started.sessionId,
-      offset: 0,
-      wait_ms: 0,
-    });
-    assert.match(fullTail.text, /phase-one/);
-    assert.match(fullTail.text, /phase-two/);
-    assert.equal(fullTail.resultAvailable, true);
   } finally {
     restoreEnv();
     await fs.rm(tempDir, { recursive: true, force: true });

@@ -15,7 +15,7 @@ import { ArtifactStore } from "./artifacts.js";
 import { loadAgnesConfig } from "./agnesConfig.js";
 import { AgnesHttpClient } from "./agnesHttp.js";
 import { AGNES_TOOLS } from "./agnesToolSchemas.js";
-import { cancelClaudeCodeSession, claudeCodeStatus, delegateToClaudeCode, getClaudeCodeSessionResult, readHarnessTask, sendMessageToHarness, startClaudeCodeTask, tailClaudeCodeSession, workspaceAppendFile, workspaceFinalizeFile, workspaceRunCommand, type CcPermissionDecision, type CcPermissionRequest, type CcRunHooks, type CcRuntimeEvent } from "./ccBridge.js";
+import { claudeCodeStatus, delegateToClaudeCode, readHarnessTask, sendMessageToHarness, workspaceAppendFile, workspaceFinalizeFile, workspaceRunCommand, type CcPermissionDecision, type CcPermissionRequest, type CcRunHooks, type CcRuntimeEvent } from "./ccBridge.js";
 import { CC_CALLBACK_TOOLS, ccToolsFromEnv } from "./ccToolSchemas.js";
 import { loadConfig } from "./config.js";
 import { errorToJson } from "./errors.js";
@@ -415,7 +415,7 @@ async function runCcMcpServer(profileId = "default"): Promise<void> {
 
   function isTaskDelegationCall(name: string, args: unknown): boolean {
     if (name === "delegate_coding_task" || name === "delegate_to_claude_code") return true;
-    return name === "delegate" && ["", "task", "delegate", "run_task", "start"].includes(delegateAction(args));
+    return name === "delegate" && ["", "task", "delegate", "run_task"].includes(delegateAction(args));
   }
 
   async function dispatchDelegate(args: unknown, hooks: CcRunHooks): Promise<unknown | CallToolResult> {
@@ -424,14 +424,6 @@ async function runCcMcpServer(profileId = "default"): Promise<void> {
       case "delegate":
       case "run_task":
         return delegateToClaudeCode(args, profileId, hooks);
-      case "start":
-        return startClaudeCodeTask(args, profileId, hooks);
-      case "tail":
-        return tailClaudeCodeSession(args);
-      case "result":
-        return getClaudeCodeSessionResult(args);
-      case "cancel":
-        return cancelClaudeCodeSession(args);
       case "status":
         return claudeCodeStatus();
       case "append_file":

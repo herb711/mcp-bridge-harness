@@ -274,28 +274,6 @@ export const BUILTIN_CATALOG: CatalogEntry[] = [
         advanced: true,
       },
       {
-        key: "CC_MCP_REMOTE_INSTALL_DIR",
-        label: "Remote cc-mcp install dir",
-        type: "text",
-        default: "~/.local/share/mcp-harness/cc-mcp-server",
-        advanced: true,
-      },
-      {
-        key: "CC_MCP_REMOTE_HARNESS_HOME",
-        label: "Remote MCP_HARNESS_HOME",
-        type: "text",
-        default: "~/.local/share/mcp-harness",
-        advanced: true,
-      },
-      {
-        key: "CC_MCP_REMOTE_WORKDIR",
-        label: "Remote default workdir",
-        type: "text",
-        placeholder: "~/project",
-        help: "Claude Code works on this server path by default. Tool calls can still override it with workspace/cwd.",
-        advanced: true,
-      },
-      {
         key: "CC_MCP_REMOTE_NODE_COMMAND",
         label: "Remote Node command",
         type: "text",

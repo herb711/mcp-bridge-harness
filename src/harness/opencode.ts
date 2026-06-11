@@ -64,14 +64,13 @@ Use CC MCP as a delegated coding executor, not as a chat assistant.
 - Delegate only concrete coding subtasks to cc-mcp_delegate when the user or active workflow intentionally calls for cc-mcp or Claude Code execution. Good modes are implement, debug, refactor, test, review, and inspect.
 - Delegate only work that can be completed inside the configured worker environment. Do not use cc-mcp for primary-machine-only files, local shell commands, desktop apps, or local-only paths unavailable to the worker.
 - Once the user or active workflow intentionally chooses cc-mcp/Claude Code for a task, all file edits, shell commands, tests, and repository inspection for that task must happen through cc-mcp in the worker environment. The main harness should supervise, split work, read the returned terminalLog/result, and verify outcomes; it should not run parallel local Bash/Python/heredoc commands for that task.
-- For delegated coding tasks, use the async flow by default: call cc-mcp_delegate with action=start, then keep calling action=tail with the returned session_id and latest nextOffset until it is done, then call action=result. Surface useful tail output to the user as progress.
-- Do not omit action for delegated coding tasks. Use action=task only if the user explicitly asks for a single blocking synchronous cc-mcp call.
 - Do not place long scripts, large base64 payloads, or heredoc bodies in cc-mcp_delegate task text. For long script transfer, base64-encode locally, split into chunks around 1500 characters, call cc-mcp_delegate with action=append_file for each chunk, call cc-mcp_delegate with action=finalize_file and sha256, then call cc-mcp_delegate with action=run_command to execute it in the worker workspace.
 - Do not delegate vague planning, product judgment, user-facing explanation, or tasks that require asking the user for clarification.
 - Before delegation, provide mode, task, relevant context, constraints, target files when known, and acceptance criteria. Provide workspace/cwd only when the worker should run outside the configured default workdir.
 - After the worker returns, review the structured report, inspect claimed changes when needed, decide whether acceptance criteria are met, and either continue with another delegated subtask or summarize the final result.
 - Do not blindly trust the worker result. If the task is simple enough to complete directly, do it directly instead of delegating.
 - cc-mcp captures Claude Code stdout/stderr into terminalLog. Read the final cc-mcp result, including terminalLog, before responding.
+- cc-mcp may stream Claude Code progress while the tool call is running. If Claude Code asks for permissions and the main harness supports authorization prompts, answer them according to the active harness permissions.
 - For diagnostics, call cc-mcp_delegate with action=status to check whether the configured Claude Code command is available.
 `;
 
@@ -83,6 +82,7 @@ function remoteCcInstructionText(env: Record<string, string>): string {
 Remote cc-mcp target: ${nickname}
 - Do not use this target for primary-machine-only files, local shell commands, desktop apps, or local-only paths.
 - ${workdir ? `The configured default worker workspace is ${workdir}.` : "If delegation is intentional and needs a non-default workspace, pass the absolute path that is valid in the worker environment."}
+- Claude Code is already running on this target; use workspace/cwd directly for files on this target instead of wrapping the work in another ssh command.
 `;
 }
 
